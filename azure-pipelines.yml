@@ -44,7 +44,7 @@ steps:
 
 - task: NuGetCommand@2
   displayName: Nuget Push
-  condition: $[eq(variables['Build.SourceBranch'],'refs/heads/main')]
+  condition: eq(variables['Build.SourceBranch'],'refs/heads/main')
   inputs:
     command: 'push'
     packagesToPush: '$(Build.ArtifactStagingDirectory)/**/*.nupkg;!$(Build.ArtifactStagingDirectory)/**/*.symbols.nupkg'
@@ -60,7 +60,7 @@ steps:
 
 - task: PublishPipelineArtifact@1
   displayName: Upload pipeline workspace for debugging purposes
-  condition: $[eq(variables['Build.SourceBranch'],'refs/heads/azure-pipelines')]
+  condition: eq(variables['Build.SourceBranch'],'refs/heads/azure-pipelines')
   inputs:
     targetPath: '$(Pipeline.Workspace)'
     artifact: 'Workspace'
