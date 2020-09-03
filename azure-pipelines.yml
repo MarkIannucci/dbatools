@@ -6,6 +6,9 @@ trigger:
 - main
 pr:
 - main
+variables: 
+- name: system.debug
+  value: true
 
 pool:
   vmImage: 'windows-latest'
@@ -41,7 +44,7 @@ steps:
   inputs:
     targetType: 'inline'
     script: |
-      ((Get-Content -path $(Pipeline.Workspace)/b/dbatools.nuspec -Raw) -replace "1.0.116","1.0.116-D$(BuildID)") | Set-Content -Path $(Pipeline.Workspace)/b/dbatools.nuspec
+      ((Get-Content -path $(Pipeline.Workspace)/b/dbatools.nuspec -Raw) -replace "1.0.116","$(Build.BuildNumber)") | Set-Content -Path $(Pipeline.Workspace)/b/dbatools.nuspec
 
 - task: NuGetCommand@2
   displayName: Nuget Pack
