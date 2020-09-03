@@ -1,5 +1,8 @@
 # https://aka.ms/yaml
+<<<<<<< HEAD
 
+=======
+>>>>>>> main
 trigger:
 - main
 pr:
@@ -45,7 +48,11 @@ steps:
 
 - task: NuGetCommand@2
   displayName: Nuget Push
+<<<<<<< HEAD
   condition: $[eq(variables['Build.SourceBranch'],'refs/heads/main')]
+=======
+  condition: eq(variables['Build.SourceBranch'],'refs/heads/main')
+>>>>>>> main
   inputs:
     command: 'push'
     packagesToPush: '$(Build.ArtifactStagingDirectory)/**/*.nupkg;!$(Build.ArtifactStagingDirectory)/**/*.symbols.nupkg'
@@ -55,13 +62,21 @@ steps:
 - task: PublishPipelineArtifact@1
   displayName: Upload pipeline staging directory
   inputs:
+<<<<<<< HEAD
     targetPath: '$(Pipeline.ArtifactStagingDirectory)'
+=======
+    targetPath: '$(Build.ArtifactStagingDirectory)'
+>>>>>>> main
     artifact: 'Staging directory'
     publishLocation: 'pipeline'
 
 - task: PublishPipelineArtifact@1
   displayName: Upload pipeline workspace for debugging purposes
+<<<<<<< HEAD
   condition: $[eq(variables['Build.SourceBranch'],'refs/heads/azure-pipelines']
+=======
+  condition: eq(variables['system.pullRequest.sourceBranch'],'refs/heads/azure-pipelines')
+>>>>>>> main
   inputs:
     targetPath: '$(Pipeline.Workspace)'
     artifact: 'Workspace'
