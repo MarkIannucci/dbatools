@@ -1,5 +1,4 @@
 # https://aka.ms/yaml
-
 trigger:
 - main
 pr:
@@ -61,7 +60,7 @@ steps:
 
 - task: PublishPipelineArtifact@1
   displayName: Upload pipeline workspace for debugging purposes
-  condition: $[eq(variables['Build.SourceBranch'],'refs/heads/azure-pipelines']
+  condition: $[eq(variables['Build.SourceBranch'],'refs/heads/azure-pipelines')]
   inputs:
     targetPath: '$(Pipeline.Workspace)'
     artifact: 'Workspace'
