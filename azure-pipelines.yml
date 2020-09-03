@@ -12,6 +12,7 @@ steps:
 # use chrissy's script to create allcommands.ps1
 # https://blog.netnerds.net/2018/12/even-faster-powershell-module-loading/
 - task: PowerShell@2
+  displayName: Write allcommands.ps1
   inputs:
     targetType: 'inline'
     script: |
@@ -20,6 +21,7 @@ steps:
       Get-ChildItem -Path ".\internal\functions\*.ps1" -Recurse | Get-Content | Add-Content .\allcommands.ps1
 # only pack the stuff we want so our package isn't 215 MBs!
 - task: PowerShell@2
+  displayName: prepare files for nuget package
   inputs:
     targetType: 'inline'
     script: |
@@ -32,6 +34,7 @@ steps:
       Copy-item .\xml $(Pipeline.Workspace)/b -Recurse
 
 - task: NuGetCommand@2
+  displayName: Nuget Pack
   inputs:
     command: 'pack'
     packagesToPack: '$(Pipeline.Workspace)/b/dbatools.nuspec'
@@ -41,6 +44,8 @@ steps:
     patchVersion: '116'
 
 - task: NuGetCommand@2
+  displayName: Nuget Push
+  condition: $[eq(variables['Build.SourceBranch'],'refs/heads/main')]
   inputs:
     command: 'push'
     packagesToPush: '$(Build.ArtifactStagingDirectory)/**/*.nupkg;!$(Build.ArtifactStagingDirectory)/**/*.symbols.nupkg'
@@ -48,6 +53,15 @@ steps:
     publishVstsFeed: 'cbb2d910-3718-48fa-97a7-95df7049ca3f'
 
 - task: PublishPipelineArtifact@1
+  displayName: Upload pipeline staging directory
+  inputs:
+    targetPath: '$(Pipeline.ArtifactStagingDirectory)'
+    artifact: 'Staging directory'
+    publishLocation: 'pipeline'
+
+- task: PublishPipelineArtifact@1
+  displayName: Upload pipeline workspace for debugging purposes
+  condition: $[eq(variables['Build.SourceBranch'],'refs/heads/azure-pipelines']
   inputs:
     targetPath: '$(Pipeline.Workspace)'
     artifact: 'Workspace'
