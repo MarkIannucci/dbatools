@@ -35,12 +35,20 @@ steps:
       Copy-item .\optional $(Pipeline.Workspace)/b -Recurse
       Copy-item .\xml $(Pipeline.Workspace)/b -Recurse
 
+# this is necessary due to https://github.com/microsoft/azure-pipelines-tasks/issues/13509
+- task: PowerShell@2
+  displayName: update version in nuspec
+  inputs:
+    targetType: 'inline'
+    script: |
+      ((Get-Content -path $(Pipeline.Workspace)/b/dbatools.nuspec -Raw) -replace '1.0.116','1.0.116-D$(BuildID)') | Set-Content -Path $(Pipeline.Workspace)/b/dbatools.nuspec
+
 - task: NuGetCommand@2
   displayName: Nuget Pack
   inputs:
     command: 'pack'
     packagesToPack: '$(Pipeline.Workspace)/b/dbatools.nuspec'
-    versioningScheme: 'byBuildNumber'
+    versioningScheme: off
 
 - task: NuGetCommand@2
   displayName: Nuget Push
