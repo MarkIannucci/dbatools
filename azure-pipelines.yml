@@ -1,4 +1,7 @@
 # https://aka.ms/yaml
+# the build name will produce a semver pre-release version which is compatible with Powershell
+# https://docs.microsoft.com/en-us/powershell/scripting/gallery/concepts/module-prerelease-support?view=powershell-7
+name: 1.0.116-$(BuildID)
 trigger:
 - main
 pr:
@@ -37,10 +40,7 @@ steps:
   inputs:
     command: 'pack'
     packagesToPack: '$(Pipeline.Workspace)/b/dbatools.nuspec'
-    versioningScheme: 'byPrereleaseNumber'
-    majorVersion: '1'
-    minorVersion: '0'
-    patchVersion: '116'
+    versioningScheme: 'byBuildNumber'
 
 - task: NuGetCommand@2
   displayName: Nuget Push
