@@ -54,7 +54,7 @@ steps:
 - task: PublishPipelineArtifact@1
   displayName: Upload pipeline staging directory
   inputs:
-    targetPath: '$(Pipeline.ArtifactStagingDirectory)'
+    targetPath: '$(Build.ArtifactStagingDirectory)'
     artifact: 'Staging directory'
     publishLocation: 'pipeline'
 
