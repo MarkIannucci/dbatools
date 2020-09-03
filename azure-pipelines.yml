@@ -1,7 +1,7 @@
 # https://aka.ms/yaml
 # the build name will produce a semver pre-release version which is compatible with Powershell
 # https://docs.microsoft.com/en-us/powershell/scripting/gallery/concepts/module-prerelease-support?view=powershell-7
-name: 1.0.116-D$(BuildID)
+name: '1.0.116-D$(BuildID)'
 trigger:
 - main
 pr:
