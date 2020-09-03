@@ -1,11 +1,14 @@
 # https://aka.ms/yaml
 # the build name will produce a semver pre-release version which is compatible with Powershell
 # https://docs.microsoft.com/en-us/powershell/scripting/gallery/concepts/module-prerelease-support?view=powershell-7
-name: 1.0.116-$(BuildID)
+name: '1.0.116-D$(BuildID)'
 trigger:
 - main
 pr:
 - main
+variables: 
+- name: system.debug
+  value: true
 
 pool:
   vmImage: 'windows-latest'
@@ -35,12 +38,20 @@ steps:
       Copy-item .\optional $(Pipeline.Workspace)/b -Recurse
       Copy-item .\xml $(Pipeline.Workspace)/b -Recurse
 
+# this is necessary due to https://github.com/microsoft/azure-pipelines-tasks/issues/13509
+- task: PowerShell@2
+  displayName: update version in nuspec
+  inputs:
+    targetType: 'inline'
+    script: |
+      ((Get-Content -path $(Pipeline.Workspace)/b/dbatools.nuspec -Raw) -replace "1.0.116","$(Build.BuildNumber)") | Set-Content -Path $(Pipeline.Workspace)/b/dbatools.nuspec
+
 - task: NuGetCommand@2
   displayName: Nuget Pack
   inputs:
     command: 'pack'
     packagesToPack: '$(Pipeline.Workspace)/b/dbatools.nuspec'
-    versioningScheme: 'byBuildNumber'
+    versioningScheme: off
 
 - task: NuGetCommand@2
   displayName: Nuget Push
@@ -60,7 +71,7 @@ steps:
 
 - task: PublishPipelineArtifact@1
   displayName: Upload pipeline workspace for debugging purposes
-  condition: eq(variables['system.pullRequest.sourceBranch'],'refs/heads/azure-pipelines')
+  condition: or(eq(variables['system.pullRequest.sourceBranch'],'azure-pipelines'),failed())
   inputs:
     targetPath: '$(Pipeline.Workspace)'
     artifact: 'Workspace'
