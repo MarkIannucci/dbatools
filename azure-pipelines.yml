@@ -71,7 +71,7 @@ steps:
 
 - task: PublishPipelineArtifact@1
   displayName: Upload pipeline workspace for debugging purposes
-  condition: or(eq(variables['system.pullRequest.sourceBranch'],'refs/heads/azure-pipelines'),failed())
+  condition: or(eq(variables['system.pullRequest.sourceBranch'],'azure-pipelines'),failed())
   inputs:
     targetPath: '$(Pipeline.Workspace)'
     artifact: 'Workspace'
