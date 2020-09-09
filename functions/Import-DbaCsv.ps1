@@ -302,7 +302,7 @@ function Import-DbaCsv {
         [switch]$UseColumnDefault,
         [switch]$NoTransaction,
         [switch]$EnableException,
-        [hashtable[]]$StaticColumnMap
+        [hashtable]$StaticColumnMap
     )
     begin {
         $FirstRowHeader = $NoHeaderRow -eq $false
@@ -653,17 +653,18 @@ function Import-DbaCsv {
                         {
                             $sqlColDefaultValues = @();
                             $sqlCol = ""
-                            foreach ($column in $StaticColumnMap.GetEnumerator()) {
+                            write-message -Level Verbose "StaticColumnMap: $($StaticColumnMap | out-string)"
+                            foreach ($staticcolumn in $StaticColumnMap.GetEnumerator()) {
                                 $setValue = ""
-                                switch ($column.Value[0]) {
-                                    "bigint" { $setValue = "$($column.Value[1])" } #TODO?  improve this code to handle more numeric datatypes.
-                                    Default { $setvalue = "'$($column.Value[1])'"}
+                                switch ($staticcolumn.Value[0]) {
+                                    "bigint" { $setValue = "$($staticcolumn.Value[1])" } #TODO?  improve this code to handle more numeric datatypes.
+                                    Default { $setvalue = "'$($staticcolumn.Value[1])'"}
                                 }
-                                $sqlCol = "$($column.key) = $setValue"
+                                $sqlCol = "$($staticcolumn.key) = $setValue"
                                 Write-Message -Level Verbose -Message "sqlCol: $sqlCol"
                                 $sqlColDefaultValues += $sqlCol
                             }
-                            Write-Message -Level Verbose "sqlColDefaultValues: $sqlColDefaultValues"
+                            Write-Message -Level Verbose -Message "sqlColDefaultValues: $sqlColDefaultValues"
 
                             if ($PSCmdlet.ShouldProcess($instance, "Performing Static column value UPDATE TABLE [$schema].[$table] on $Database")) {
                                 $sql = "UPDATE [$schema].[$table] SET $($sqlColDefaultValues -join ' ,')"
