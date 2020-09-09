@@ -51,7 +51,7 @@ steps:
   inputs:
     targetType: 'inline'
     script: |
-      ((Get-Content -path $(Pipeline.Workspace)/b/dbatools.psd1 -Raw) -replace "1.0.116","$(Build.BuildNumber)") | Set-Content -Path $(Pipeline.Workspace)/b/dbatools.nuspec
+      ((Get-Content -path $(Pipeline.Workspace)/b/dbatools.psd1 -Raw) -replace "1.0.116","$(Build.BuildNumber)") | Set-Content -Path $(Pipeline.Workspace)/b/dbatools.psd1
 
 - task: NuGetCommand@2
   displayName: Nuget Pack
