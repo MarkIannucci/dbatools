@@ -186,6 +186,7 @@ function Import-DbaCsv {
         Allows you to insert static data in every row.  
         Expects a hashtable where the key is the column name and the value is an array containing the datatype followed by the static data.
         Uses an Update statement after the data are inserted, so only works if a transaction was used and the table was truncated as part of the operation
+        Hashtable Syntax: @{FileFullName=@("nvarchar(255)","myfile.csv");ExecutionId("bigint","1234")}
 
     .NOTES
         Tags: Migration, Import
