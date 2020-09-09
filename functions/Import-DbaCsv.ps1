@@ -656,10 +656,10 @@ function Import-DbaCsv {
                             foreach ($column in $StaticColumnMap.GetEnumerator()) {
                                 $setValue = ""
                                 switch ($column.Value[0]) {
-                                    "bigint" { $setValue = $column.Value[1] } #TODO?  improve this code to handle more numeric datatypes.
+                                    "bigint" { $setValue = "$($column.Value[1])" } #TODO?  improve this code to handle more numeric datatypes.
                                     Default { $setvalue = "'$($column.Value[1])'"}
                                 }
-                                $sqlCol = "$key = $setValue"
+                                $sqlCol = "$($column.key) = $setValue"
                                 $sqlColDefaultValues += $sqlCol
                             }
 
