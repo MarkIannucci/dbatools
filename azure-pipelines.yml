@@ -45,6 +45,13 @@ steps:
     targetType: 'inline'
     script: |
       ((Get-Content -path $(Pipeline.Workspace)/b/dbatools.nuspec -Raw) -replace "1.0.116","$(Build.BuildNumber)") | Set-Content -Path $(Pipeline.Workspace)/b/dbatools.nuspec
+# update version in module manifest
+- task: PowerShell@2
+  displayName: update version in module manifest
+  inputs:
+    targetType: 'inline'
+    script: |
+      ((Get-Content -path $(Pipeline.Workspace)/b/dbatools.psd1 -Raw) -replace "1.0.116","$(Build.BuildNumber)") | Set-Content -Path $(Pipeline.Workspace)/b/dbatools.nuspec
 
 - task: NuGetCommand@2
   displayName: Nuget Pack
