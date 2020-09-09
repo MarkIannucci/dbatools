@@ -672,8 +672,6 @@ function Import-DbaCsv {
                                     Stop-Function -Continue -Message "Failed to execute $sql. `nDid you specify the proper delimiter? `n$errormessage"
                                 }
                             }
-                     }
-
                         }
                         
                         $completed = $true
