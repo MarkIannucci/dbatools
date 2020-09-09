@@ -670,6 +670,7 @@ function Import-DbaCsv {
                                 $sql = "UPDATE [$schema].[$table] SET $($sqlColDefaultValues -join ' ,')"
                                 Write-Message -Level Verbose -Message "About to run update statement: $sql"
                                 $sqlcmd = New-Object System.Data.SqlClient.SqlCommand($sql, $sqlconn, $transaction)
+                                $sqlcmd.CommandTimeout = 0
                                 try {
                                     $null = $sqlcmd.ExecuteNonQuery()
                                 } catch {
