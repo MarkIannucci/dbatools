@@ -660,11 +660,14 @@ function Import-DbaCsv {
                                     Default { $setvalue = "'$($column.Value[1])'"}
                                 }
                                 $sqlCol = "$($column.key) = $setValue"
+                                Write-Message -Level Verbose -Message "sqlCol: $sqlCol"
                                 $sqlColDefaultValues += $sqlCol
                             }
+                            Write-Message -Level Verbose "sqlColDefaultValues: $sqlColDefaultValues"
 
                             if ($PSCmdlet.ShouldProcess($instance, "Performing Static column value UPDATE TABLE [$schema].[$table] on $Database")) {
                                 $sql = "UPDATE [$schema].[$table] SET $($sqlColDefaultValues -join ' ,')"
+                                Write-Message -Level Verbose -Message "About to run update statement: $sql"
                                 $sqlcmd = New-Object System.Data.SqlClient.SqlCommand($sql, $sqlconn, $transaction)
                                 try {
                                     $null = $sqlcmd.ExecuteNonQuery()
