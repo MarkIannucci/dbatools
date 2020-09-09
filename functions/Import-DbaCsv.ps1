@@ -181,6 +181,12 @@ function Import-DbaCsv {
         By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message.
         This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting.
         Using this switch turns this "nice by default" feature off and enables you to catch exceptions with your own try/catch.
+    
+    .PARAMETER StaticColumnMap
+        Allows you to insert static data in every row.  
+        Expects a hashtable where the key is the column name and the value is an array containing the datatype followed by the static data.
+        Uses an Update statement after the data are inserted, so only works if a transaction was used and the table was truncated as part of the operation
+        Hashtable Syntax: @{FileFullName=@("nvarchar(255)","myfile.csv");ExecutionId("bigint","1234")}
 
     .NOTES
         Tags: Migration, Import
@@ -295,7 +301,8 @@ function Import-DbaCsv {
         [switch]$SupportsMultiline,
         [switch]$UseColumnDefault,
         [switch]$NoTransaction,
-        [switch]$EnableException
+        [switch]$EnableException,
+        [hashtable]$StaticColumnMap
     )
     begin {
         $FirstRowHeader = $NoHeaderRow -eq $false
@@ -357,6 +364,11 @@ function Import-DbaCsv {
 
             foreach ($column in $Columns) {
                 $sqldatatypes += "[$column] varchar(MAX)"
+            }
+            # append static columns and their data types
+            foreach ($column in $StaticColumnMap.GetEnumerator())
+            {
+                $sqldatatypes += "[$($column.Name)] $($column.Value[0])"
             }
 
             $sql = "BEGIN CREATE TABLE [$schema].[$table] ($($sqldatatypes -join ' NULL,')) END"
@@ -635,6 +647,39 @@ function Import-DbaCsv {
 
                         $reader.Close()
                         $reader.Dispose()
+                        
+                        #update static columns if truncate and transaction were used.  Inspired by https://github.com/sqlcollaborative/dbatools/issues/6676#issuecomment-683527688
+                        if ($Truncate -and !$NoTransaction -and $StaticColumnMap)
+                        {
+                            $sqlColDefaultValues = @();
+                            $sqlCol = ""
+                            write-message -Level Verbose "StaticColumnMap: $($StaticColumnMap | out-string)"
+                            foreach ($staticcolumn in $StaticColumnMap.GetEnumerator()) {
+                                $setValue = ""
+                                switch ($staticcolumn.Value[0]) {
+                                    "bigint" { $setValue = "$($staticcolumn.Value[1])" } #TODO?  improve this code to handle more numeric datatypes.
+                                    Default { $setvalue = "'$($staticcolumn.Value[1])'"}
+                                }
+                                $sqlCol = "$($staticcolumn.key) = $setValue"
+                                Write-Message -Level Verbose -Message "sqlCol: $sqlCol"
+                                $sqlColDefaultValues += $sqlCol
+                            }
+                            Write-Message -Level Verbose -Message "sqlColDefaultValues: $sqlColDefaultValues"
+
+                            if ($PSCmdlet.ShouldProcess($instance, "Performing Static column value UPDATE TABLE [$schema].[$table] on $Database")) {
+                                $sql = "UPDATE [$schema].[$table] SET $($sqlColDefaultValues -join ' ,')"
+                                Write-Message -Level Verbose -Message "About to run update statement: $sql"
+                                $sqlcmd = New-Object System.Data.SqlClient.SqlCommand($sql, $sqlconn, $transaction)
+                                $sqlcmd.CommandTimeout = 0
+                                try {
+                                    $null = $sqlcmd.ExecuteNonQuery()
+                                } catch {
+                                    $errormessage = $_.Exception.Message.ToString()
+                                    Stop-Function -Continue -Message "Failed to execute $sql. `nDid you specify the proper delimiter? `n$errormessage"
+                                }
+                            }
+                        }
+                        
                         $completed = $true
                     } catch {
                         $completed = $false
