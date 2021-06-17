@@ -667,7 +667,7 @@ function Import-DbaCsv {
 
                             #if we're truncating and wrapped in a transaction, otherwise provide potentially unsafe sql as output to be used by caller with discretion
                             $UpdateStatementForStaticColumns = "UPDATE [$schema].[$table] SET $($sqlColDefaultValues -join ' ,')"
-                            if ($Truncate -and !$NoTransaction) {
+                            if ($Truncate -and !$NoTransaction -and $PSCmdlet.ShouldProcess($instance, "Performing Static column value UPDATE TABLE [$schema].[$table] on $Database")) {
                                 Write-Message -Level Verbose -Message "About to run update statement: $sql"
                                 $sqlcmd = New-Object System.Data.SqlClient.SqlCommand($sql, $sqlconn, $transaction)
                                 $sqlcmd.CommandTimeout = 0
