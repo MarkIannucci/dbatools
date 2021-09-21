@@ -1,14 +1,13 @@
 $CommandName = $MyInvocation.MyCommand.Name.Replace(".Tests.ps1", "")
 Write-Host -Object "Running $PSCommandPath" -ForegroundColor Cyan
 . "$PSScriptRoot\constants.ps1"
-. "$PSScriptRoot\..\internal\functions\Connect-SqlInstance.ps1"
 . "$PSScriptRoot\..\internal\functions\Get-PasswordHash.ps1"
 . "$PSScriptRoot\..\internal\functions\Convert-HexStringToByte.ps1"
 
 Describe "$CommandName Unit Tests" -Tag 'UnitTests' {
     Context "Validate parameters" {
         [object[]]$params = (Get-Command $CommandName).Parameters.Keys | Where-Object { $_ -notin ('whatif', 'confirm') }
-        [object[]]$knownParameters = 'SqlInstance', 'SqlCredential', 'Login', 'InputObject', 'LoginRenameHashtable', 'SecurePassword', 'HashedPassword', 'MapToCertificate', 'MapToAsymmetricKey', 'MapToCredential', 'Sid', 'DefaultDatabase', 'Language', 'PasswordExpirationEnabled', 'PasswordPolicyEnforced', 'Disabled', 'DenyWindowsLogin', 'NewSid', 'Force', 'EnableException'
+        [object[]]$knownParameters = 'SqlInstance', 'SqlCredential', 'Login', 'InputObject', 'LoginRenameHashtable', 'SecurePassword', 'HashedPassword', 'MapToCertificate', 'MapToAsymmetricKey', 'MapToCredential', 'Sid', 'DefaultDatabase', 'Language', 'PasswordExpirationEnabled', 'PasswordPolicyEnforced', 'PasswordMustChange', 'Disabled', 'DenyWindowsLogin', 'NewSid', 'Force', 'EnableException'
         $knownParameters += [System.Management.Automation.PSCmdlet]::CommonParameters
         It "Should only contain our specific parameters" {
             (@(Compare-Object -ReferenceObject ($knownParameters | Where-Object { $_ }) -DifferenceObject $params).Count ) | Should Be 0
@@ -23,12 +22,12 @@ Describe "$CommandName Integration Tests" -Tags "IntegrationTests" {
     $password = 'MyV3ry$ecur3P@ssw0rd'
     $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
     $sid = '0xDBA700131337C0D30123456789ABCDEF'
-    $server1 = Connect-SqlInstance -SqlInstance $script:instance1
-    $server2 = Connect-SqlInstance -SqlInstance $script:instance2
+    $server1 = Connect-DbaInstance -SqlInstance $script:instance1
+    $server2 = Connect-DbaInstance -SqlInstance $script:instance2
     $servers = @($server1, $server2)
     $computerName = $server1.NetName
     $winLogin = "$computerName\$credLogin"
-    $logins = "claudio", "port", "tester", "certifico", $winLogin
+    $logins = "claudio", "port", "tester", "certifico", $winLogin, "withMustChange", "mustChange"
 
     #cleanup
     try {
@@ -87,6 +86,7 @@ Describe "$CommandName Integration Tests" -Tags "IntegrationTests" {
             $results.IsDisabled | Should be $false
             $results.PasswordExpirationEnabled | Should be $false
             $results.PasswordPolicyEnforced | Should be $false
+            $results.MustChangePassword | Should be $false
             $results.LoginType | Should be 'SqlLogin'
         }
         It "Should be created successfully - password, credential and a custom sid " {
@@ -97,10 +97,11 @@ Describe "$CommandName Integration Tests" -Tags "IntegrationTests" {
             $results.IsDisabled | Should be $false
             $results.PasswordExpirationEnabled | Should be $false
             $results.PasswordPolicyEnforced | Should be $false
+            $results.MustChangePassword | Should be $false
             $results.Sid | Should be (Convert-HexStringToByte $sid)
             $results.LoginType | Should be 'SqlLogin'
         }
-        It "Should be created successfully - password and all the flags" {
+        It "Should be created successfully - password and all the flags (exclude -PasswordMustChange)" {
             $results = New-DbaLogin -SqlInstance $server1 -Login port -Password $securePassword -PasswordPolicy -PasswordExpiration -DefaultDatabase tempdb -Disabled -Language Nederlands -DenyWindowsLogin
             $results.Name | Should Be "port"
             $results.Language | Should Be 'Nederlands'
@@ -109,6 +110,33 @@ Describe "$CommandName Integration Tests" -Tags "IntegrationTests" {
             $results.IsDisabled | Should be $true
             $results.PasswordExpirationEnabled | Should be $true
             $results.PasswordPolicyEnforced | Should be $true
+            $results.MustChangePassword | Should be $false
+            $results.LoginType | Should be 'SqlLogin'
+            $results.DenyWindowsLogin | Should Be $true
+        }
+        It "Should be created successfully - password and all the flags (include -PasswordMustChange)" {
+            $results = New-DbaLogin -SqlInstance $server1 -Login withMustChange -Password $securePassword -PasswordPolicy -PasswordExpiration -PasswordMustChange -DefaultDatabase tempdb -Disabled -Language Nederlands -DenyWindowsLogin
+            $results.Name | Should Be "withMustChange"
+            $results.Language | Should Be 'Nederlands'
+            $results.EnumCredentials() | Should be $null
+            $results.DefaultDatabase | Should be 'tempdb'
+            $results.IsDisabled | Should be $true
+            $results.PasswordExpirationEnabled | Should be $true
+            $results.PasswordPolicyEnforced | Should be $true
+            $results.MustChangePassword | Should be $true
+            $results.LoginType | Should be 'SqlLogin'
+            $results.DenyWindowsLogin | Should Be $true
+        }
+        It "Should be created successfully - password and just -PasswordMustChange" {
+            $results = New-DbaLogin -SqlInstance $server1 -Login MustChange -Password $securePassword -PasswordMustChange -DefaultDatabase tempdb -Disabled -Language Nederlands -DenyWindowsLogin
+            $results.Name | Should Be "MustChange"
+            $results.Language | Should Be 'Nederlands'
+            $results.EnumCredentials() | Should be $null
+            $results.DefaultDatabase | Should be 'tempdb'
+            $results.IsDisabled | Should be $true
+            $results.PasswordExpirationEnabled | Should be $true
+            $results.PasswordPolicyEnforced | Should be $true
+            $results.MustChangePassword | Should be $true
             $results.LoginType | Should be 'SqlLogin'
             $results.DenyWindowsLogin | Should Be $true
         }
@@ -155,13 +183,14 @@ Describe "$CommandName Integration Tests" -Tags "IntegrationTests" {
             $login1.IsDisabled | Should be $login2.IsDisabled
             $login1.PasswordExpirationEnabled | Should be $login2.PasswordExpirationEnabled
             $login1.PasswordPolicyEnforced | Should be $login2.PasswordPolicyEnforced
+            $login1.MustChangePassword | Should be $login2.MustChangePassword
             $login1.Sid | Should be $login2.Sid
         }
 
         It "Should not have same properties because of the overrides" {
 
             $login1 = Get-DbaLogin -SqlInstance $script:instance1 -login claudio
-            $login2 = Get-DbaLogin -SqlInstance $script:instance2 -login port
+            $login2 = Get-DbaLogin -SqlInstance $script:instance2 -login withMustChange
 
             $login2 | Should Not BeNullOrEmpty
 
@@ -172,6 +201,7 @@ Describe "$CommandName Integration Tests" -Tags "IntegrationTests" {
             $login1.IsDisabled | Should Not be $login2.IsDisabled
             $login1.PasswordExpirationEnabled | Should Not be $login2.PasswordExpirationEnabled
             $login1.PasswordPolicyEnforced | Should Not be $login2.PasswordPolicyEnforced
+            $login1.MustChangePassword | Should Not be $login2.MustChangePassword
             $login1.Sid | Should Not be $login2.Sid
         }
         if ($IsWindows -ne $false) {

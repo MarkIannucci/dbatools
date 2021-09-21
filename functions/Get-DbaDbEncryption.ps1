@@ -78,9 +78,9 @@ function Get-DbaDbEncryption {
             #For each SQL Server in collection, connect and get SMO object
 
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             #If IncludeSystemDBs is true, include systemdbs
@@ -136,7 +136,9 @@ function Get-DbaDbEncryption {
                         $returnCertificate.Owner = $serverCertificate.Owner
                         $returnCertificate.Object = $serverCertificate
                         $returnCertificate.ExpirationDate = $serverCertificate.ExpirationDate
-                        $returnCertificate.EncryptionAlgorithm = $db.DatabaseEncryptionKey.Properties | Where-Object( { $psitem.name -eq 'EncryptionAlgorithm' }).value
+                        If ($true -eq $db.DatabaseEncryptionKey.Properties.Contains("EncryptionAlgorithm")) {
+                            $returnCertificate.EncryptionAlgorithm = $db.DatabaseEncryptionKey.Properties["EncryptionAlgorithm"].value
+                        }
                     }
 
                     $returnCertificate

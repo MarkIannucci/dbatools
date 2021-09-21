@@ -61,6 +61,7 @@ function Find-DbaLoginInGroup {
             Add-Type -AssemblyName System.DirectoryServices.AccountManagement
         } catch {
             Stop-Function -Message "Failed to load Assembly needed" -ErrorRecord $_
+            return
         }
 
         function Get-AllLogins {
@@ -121,15 +122,18 @@ function Find-DbaLoginInGroup {
     }
 
     process {
+        if (Test-FunctionInterrupt) { return }
+
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             $AdGroups = $server.Logins | Where-Object { $_.LoginType -eq "WindowsGroup" -and $_.Name -ne "BUILTIN\Administrators" -and $_.Name -notlike "*NT SERVICE*" }
 
+            $ADGroupOut = @()
             foreach ($AdGroup in $AdGroups) {
                 Write-Message -Level Verbose -Message "Looking at Group: $AdGroup"
                 $ADGroupOut += Get-AllLogins $AdGroup.Name -ParentADGroup $AdGroup.Name

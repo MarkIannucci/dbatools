@@ -183,9 +183,9 @@ function Test-DbaBuild {
             $hiddenProps += 'MinimumBuild'
         }
         if ($Build) {
-            $BuildVersions = Get-DbaBuildReference -Build $Build -Update:$Update -EnableException:$EnableException
+            $BuildVersions = Get-DbaBuild -Build $Build -Update:$Update -EnableException:$EnableException
         } elseif ($SqlInstance) {
-            $BuildVersions = Get-DbaBuildReference -SqlInstance $SqlInstance -SqlCredential $SqlCredential -Update:$Update -EnableException:$EnableException
+            $BuildVersions = Get-DbaBuild -SqlInstance $SqlInstance -SqlCredential $SqlCredential -Update:$Update -EnableException:$EnableException
         }
         # Moving it down here to only trigger after -Update was properly called
         if (!$IdxRef) {
@@ -226,6 +226,7 @@ function Test-DbaBuild {
                             VersionObject = $el.VersionObject
                             SP            = $lastsp
                             CU            = $el.CU
+                            Retired       = $el.Retired
                         }
                     }
                 }
@@ -244,7 +245,7 @@ function Test-DbaBuild {
                         $targetedBuild = $SPsAndCUs | Where-Object SP -eq $targetSPName | Select-Object -First 1
                     }
                     if ($ParsedMaxBehind.ContainsKey('CU')) {
-                        [string[]]$AllCUs = ($SPsAndCUs | Where-Object VersionObject -gt $targetedBuild.VersionObject).CU | Select-Object -Unique
+                        [string[]]$AllCUs = ($SPsAndCUs | Where-Object VersionObject -gt $targetedBuild.VersionObject | Where-Object Retired -ne $true).CU | Select-Object -Unique
                         if ($AllCUs.Length -gt 0) {
                             #CU after the targeted build available
                             $targetCU = $AllCUs.Length - $ParsedMaxBehind['CU'] - 1

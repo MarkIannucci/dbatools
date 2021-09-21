@@ -85,11 +85,10 @@ function Test-DbaConnectionAuthScheme {
 
     process {
         foreach ($instance in $SqlInstance) {
-
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 9
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 9
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             Write-Message -Level Verbose -Message "Getting results for the following query: $sql."
@@ -110,7 +109,7 @@ function Test-DbaConnectionAuthScheme {
                     ComputerName = $results.ComputerName
                     InstanceName = $results.InstanceName
                     SqlInstance  = $results.SqlInstance
-                    Result       = ($server.AuthScheme -eq $auth)
+                    Result       = ($results.AuthScheme -eq $auth)
                 } | Select-DefaultView -Property SqlInstance, Result
             } else {
                 Select-DefaultView -InputObject $results -Property ComputerName, InstanceName, SqlInstance, Transport, AuthScheme

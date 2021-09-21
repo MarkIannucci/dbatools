@@ -111,12 +111,10 @@ function Repair-DbaDbOrphanUser {
     process {
 
         foreach ($instance in $SqlInstance) {
-
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Write-Message -Level Warning -Message "Failed to connect to: $SqlInstance."
-                continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             $DatabaseCollection = $server.Databases | Where-Object IsAccessible
@@ -134,12 +132,9 @@ function Repair-DbaDbOrphanUser {
 
                         Write-Message -Level Verbose -Message "Validating users on database '$db'."
 
-                        if ($Users.Count -eq 0) {
-                            #the third validation will remove from list sql users without login. The rule here is Sid with length higher than 16
-                            $UsersToWork = $db.Users | Where-Object { $_.Login -eq "" -and ($_.ID -gt 4) -and (($_.Sid.Length -gt 16 -and $_.LoginType -in @([Microsoft.SqlServer.Management.Smo.LoginType]::SqlLogin, [Microsoft.SqlServer.Management.Smo.LoginType]::Certificate)) -eq $false) }
-                        } else {
-                            #the fourth validation will remove from list sql users without login. The rule here is Sid with length higher than 16
-                            $UsersToWork = $db.Users | Where-Object { $_.Login -eq "" -and ($_.ID -gt 4) -and ($Users -contains $_.Name) -and (($_.Sid.Length -gt 16 -and $_.LoginType -in @([Microsoft.SqlServer.Management.Smo.LoginType]::SqlLogin, [Microsoft.SqlServer.Management.Smo.LoginType]::Certificate)) -eq $false) }
+                        $UsersToWork = (Get-DbaDbOrphanUser -SqlInstance $server -Database $db.Name).SmoUser
+                        if ($Users.Count -gt 0) {
+                            $UsersToWork = $UsersToWork | Where-Object { $Users -contains $_.Name }
                         }
 
                         if ($UsersToWork.Count -gt 0) {

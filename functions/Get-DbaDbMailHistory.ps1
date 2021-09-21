@@ -70,9 +70,9 @@ function Get-DbaDbMailHistory {
         foreach ($instance in $SqlInstance) {
 
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Failure" -Category Connectiondbmail -dbmailRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             $sql = "SELECT SERVERPROPERTY('MachineName') AS ComputerName,
@@ -119,7 +119,7 @@ function Get-DbaDbMailHistory {
                 $wherearray = @()
 
                 if ($Since) {
-                    $wherearray += "send_request_date >= '$($Since.ToString("yyyy-MM-ddTHH:mm:ss"))'"
+                    $wherearray += "send_request_date >= CONVERT(datetime,'$($Since.ToString("yyyy-MM-ddTHH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture))',126)"
                 }
 
                 if ($Status) {

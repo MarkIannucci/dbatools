@@ -148,25 +148,28 @@ function Export-DbaScript {
     )
     begin {
         $null = Test-ExportDirectory -Path $Path
-        if ($IsWindows -ne $false) {
+        if ($IsLinux -or $IsMacOs) {
+            $executingUser = $env:USER
+        } else {
             $executingUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-        } else { $executingUser = $env:USER }
+        }
         $commandName = $MyInvocation.MyCommand.Name
         $prefixArray = @()
 
-        $appendToScript = $Append
+        # If -Append or -Append:$true is passed in then set these variables. Otherwise, the caller has specified -Append:$false or not specified -Append and they want to overwrite the file if it already exists.
+        $appendToScript = $false
+        if ($Append) {
+            $appendToScript = $true
+        }
+
         if ($ScriptingOptionsObject) {
             # Check if BatchTerminator is consistent
             if (($($ScriptingOptionsObject.ScriptBatchTerminator)) -and ([string]::IsNullOrWhitespace($BatchSeparator))) {
                 Write-Message -Level Warning -Message "Setting ScriptBatchTerminator to true and also having BatchSeperarator as an empty or null string may produce unintended results."
             }
-
-            if ($ScriptingOptionsObject.AppendToFile) {
-                Write-Message -Level Verbose -Message "The ScriptingOptionsObject AppendToFile setting of true will override Append parameter."
-                $appendToScript = $true
-            }
         }
 
+        $eol = [System.Environment]::NewLine
     }
 
     process {
@@ -189,6 +192,15 @@ function Export-DbaScript {
 
             if ($shorttype -eq "Configuration") {
                 Write-Message -Level Warning -Message "Support for $shorttype is limited at this time."
+            }
+
+            if ($shorttype -eq "AvailabilityGroup") {
+                Write-Message -Level Verbose -Message "Invoking .Script() as a workaround for https://github.com/sqlcollaborative/dbatools/issues/5913."
+                try {
+                    $null = $InputObject.Script()
+                } catch {
+                    Write-Message -Level Verbose -Message "Invoking .Script() failed: $_"
+                }
             }
 
             # Find the server object to pass on to the function
@@ -227,7 +239,7 @@ function Export-DbaScript {
                 if ($NoPrefix) {
                     $prefix = $null
                 } else {
-                    $prefix = "/*`n`tCreated by $executingUser using dbatools $commandName for objects on $serverName at $(Get-Date)`n`tSee https://dbatools.io/$commandName for more information`n*/"
+                    $prefix = "/*$eol`tCreated by $executingUser using dbatools $commandName for objects on $serverName at $(Get-Date)$eol`tSee https://dbatools.io/$commandName for more information$eol*/"
                 }
 
                 if ($passthru) {
@@ -239,12 +251,11 @@ function Export-DbaScript {
                         if ((Test-Path -Path $scriptPath) -and $NoClobber) {
                             Stop-Function -Message "File already exists. If you want to overwrite it remove the -NoClobber parameter. If you want to append data, please Use -Append parameter." -Target $scriptPath -Continue
                         }
-                        #Only at the first output we use the passed variables Append & NoClobber. For this execution the next ones need to buse -Append
-                        if ($null -ne $prefix) {
-                            $prefix | Out-File -FilePath $scriptPath -Encoding $encoding -Append:$appendToScript -NoClobber:$NoClobber
-                            $prefixArray += $scriptPath
-                            Write-Message -Level Verbose -Message "Writing prefix to file $scriptPath"
-                        }
+                        #Only at the first output we use the passed variables Append & NoClobber. For this execution the next ones need to use -Append
+                        # Empty $prefix will clean file in case $appendToScript is not set.
+                        Write-Message -Level Verbose -Message "Writing (maybe empty) prefix to file $scriptPath"
+                        $prefix | Out-File -FilePath $scriptPath -Encoding $encoding -Append:$appendToScript -NoClobber:$NoClobber
+                        $prefixArray += $scriptPath
                     }
                 }
 
@@ -256,16 +267,16 @@ function Export-DbaScript {
                             $ScriptingOptionsObject.FileName = $null
                             foreach ($scriptpart in $scripter.EnumScript($object)) {
                                 if ($scriptBatchTerminator) {
-                                    $scriptpart = "$scriptpart`r`n$BatchSeparator`r`n"
+                                    $scriptpart = "$scriptpart$eol$BatchSeparator$eol"
                                 }
                                 $scriptpart | Out-String
                             }
                         } else {
                             foreach ($scriptpart in $scripter.EnumScript($object)) {
                                 if ($BatchSeparator) {
-                                    $scriptpart = "$scriptpart`r`n$BatchSeparator`r`n"
+                                    $scriptpart = "$scriptpart$eol$BatchSeparator$eol"
                                 } else {
-                                    $scriptpart = "$scriptpart`r`n"
+                                    $scriptpart = "$scriptpart$eol"
                                 }
                                 $scriptpart | Out-String
                             }
@@ -274,7 +285,7 @@ function Export-DbaScript {
                         if ($ScriptingOptionsObject) {
                             if ($scriptBatchTerminator) {
                                 # Option to script batch terminator via ScriptingOptionsObject needs to write to file only
-                                $ScriptingOptionsObject.AppendToFile = (($null -ne $prefix) -or $appendToScript )
+                                $ScriptingOptionsObject.AppendToFile = $true
                                 $ScriptingOptionsObject.ToFileOnly = $true
                                 if (-not  $ScriptingOptionsObject.FileName) {
                                     $ScriptingOptionsObject.FileName = $scriptPath
@@ -288,9 +299,9 @@ function Export-DbaScript {
                                 $ScriptingOptionsObject.FileName = $null
                                 $scriptInFull = foreach ($scriptpart in $scripter.EnumScript($object)) {
                                     if ($BatchSeparator) {
-                                        $scriptpart = "$scriptpart`r`n$BatchSeparator`r`n"
+                                        $scriptpart = "$scriptpart$eol$BatchSeparator$eol"
                                     } else {
-                                        $scriptpart = "$scriptpart`r`n"
+                                        $scriptpart = "$scriptpart$eol"
                                     }
                                     $scriptpart
                                 }
@@ -300,9 +311,9 @@ function Export-DbaScript {
                         } else {
                             $scriptInFull = foreach ($scriptpart in $scripter.EnumScript($object)) {
                                 if ($BatchSeparator) {
-                                    $scriptpart = "$scriptpart`r`n$BatchSeparator`r`n"
+                                    $scriptpart = "$scriptpart$eol$BatchSeparator$eol"
                                 } else {
-                                    $scriptpart = "$scriptpart`r`n"
+                                    $scriptpart = "$scriptpart$eol"
                                 }
                                 $scriptpart
                             }

@@ -177,7 +177,7 @@ function New-DbaAgentJobStep {
         [int]$RetryInterval,
         [string]$OutputFileName,
         [switch]$Insert,
-        [ValidateSet('AppendAllCmdExecOutputToJobHistory', 'AppendToJobHistory', 'AppendToLogFile', 'LogToTableWithOverwrite', 'None', 'ProvideStopProcessEvent')]
+        [ValidateSet('AppendAllCmdExecOutputToJobHistory', 'AppendToJobHistory', 'AppendToLogFile', 'AppendToTableLog', 'LogToTableWithOverwrite', 'None', 'ProvideStopProcessEvent')]
         [string[]]$Flag,
         [string]$ProxyName,
         [switch]$Force,
@@ -212,22 +212,21 @@ function New-DbaAgentJobStep {
         if (Test-FunctionInterrupt) { return }
 
         foreach ($instance in $SqlInstance) {
-            # Try connecting to the instance
             try {
-                $Server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $Server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             foreach ($j in $Job) {
 
                 # Check if the job exists
                 if ($Server.JobServer.Jobs.Name -notcontains $j) {
-                    Write-Message -Message "Job $j doesn't exists on $instance" -Level Warning
+                    Write-Message -Message "Job $j doesn't exist on $instance" -Level Warning
                 } else {
                     # Create the job step object
                     try {
-                        # Get the job
+                        # Get the job from the server again since fields on the job object may have changed
                         $currentJob = $Server.JobServer.Jobs[$j]
 
                         # Create the job step
@@ -243,9 +242,9 @@ function New-DbaAgentJobStep {
                     # Setting the options for the job step
                     if ($StepName) {
                         # Check if the step already exists
-                        if ($Server.JobServer.Jobs[$j].JobSteps.Name -notcontains $StepName) {
+                        if ($currentJob.JobSteps.Name -notcontains $StepName) {
                             $jobStep.Name = $StepName
-                        } elseif (($Server.JobServer.Jobs[$j].JobSteps.Name -contains $StepName) -and $Force) {
+                        } elseif (($currentJob.JobSteps.Name -contains $StepName) -and $Force) {
                             Write-Message -Message "Step $StepName already exists for job. Force is used. Removing existing step" -Level Verbose
 
                             # Remove the job step based on the name
@@ -254,19 +253,19 @@ function New-DbaAgentJobStep {
                             # Set the name job step object
                             $jobStep.Name = $StepName
                         } else {
-                            Stop-Function -Message "The step name $StepName already exists for job $j" -Target $instance -Continue
+                            Stop-Function -Message "The step name $StepName already exists for job $currentJob" -Target $instance -Continue
                         }
                     }
 
                     # If the step id need to be set
                     if ($StepId) {
                         # Check if the used step id is already in place
-                        if ($Job.JobSteps.ID -notcontains $StepId) {
+                        if ($currentJob.JobSteps.ID -notcontains $StepId) {
                             Write-Message -Message "Setting job step step id to $StepId" -Level Verbose
                             $jobStep.ID = $StepId
-                        } elseif (($Job.JobSteps.ID -contains $StepID) -and $Insert) {
+                        } elseif (($currentJob.JobSteps.ID -contains $StepID) -and $Insert) {
                             Write-Message -Message "Inserting step as step $StepID" -Level Verbose
-                            foreach ($tStep in $Server.JobServer.Jobs[$j].JobSteps) {
+                            foreach ($tStep in $currentJob.JobSteps) {
                                 if ($tStep.Id -ge $Stepid) {
                                     $tStep.Id = ($tStep.ID) + 1
                                 }
@@ -275,21 +274,21 @@ function New-DbaAgentJobStep {
                                 }
                             }
                             $jobStep.ID = $StepId
-                        } elseif (($Job.JobSteps.ID -contains $StepId) -and $Force) {
+                        } elseif (($currentJob.JobSteps.ID -contains $StepId) -and $Force) {
                             Write-Message -Message "Step ID $StepId already exists for job. Force is used. Removing existing step" -Level Verbose
 
                             # Remove the existing job step
-                            $StepName = ($Server.JobServer.Jobs[$j].JobSteps | Where-Object { $_.ID -eq 1 }).Name
+                            $StepName = ($currentJob.JobSteps | Where-Object { $_.ID -eq 1 }).Name
                             Remove-DbaAgentJobStep -SqlInstance $instance -Job $currentJob -StepName $StepName -SqlCredential $SqlCredential
 
                             # Set the ID job step object
                             $jobStep.ID = $StepId
                         } else {
-                            Stop-Function -Message "The step id $StepId already exists for job $j" -Target $instance -Continue
+                            Stop-Function -Message "The step id $StepId already exists for job $currentJob" -Target $instance -Continue
                         }
                     } else {
                         # Get the job step count
-                        $jobStep.ID = $Job.JobSteps.Count + 1
+                        $jobStep.ID = $currentJob.JobSteps.Count + 1
                     }
 
                     if ($Subsystem) {

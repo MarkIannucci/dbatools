@@ -236,11 +236,10 @@ function New-DbaAgentJob {
         if (Test-FunctionInterrupt) { return }
 
         foreach ($instance in $SqlInstance) {
-            # Try connecting to the instance
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             # Check if the job already exists
@@ -251,7 +250,8 @@ function New-DbaAgentJob {
 
                 if ($PSCmdlet.ShouldProcess($instance, "Removing the job $Job on $instance")) {
                     try {
-                        Remove-DbaAgentJob -SqlInstance $instance -Job $Job -EnableException
+                        Remove-DbaAgentJob -SqlInstance $server -Job $Job -EnableException
+                        $server.JobServer.Refresh()
                     } catch {
                         Stop-Function -Message "Couldn't remove job $Job from $instance" -Target $instance -Continue -ErrorRecord $_
                     }
@@ -294,7 +294,8 @@ function New-DbaAgentJob {
                             if ($PSCmdlet.ShouldProcess($instance, "Creating job category on $instance")) {
                                 try {
                                     # Create the category
-                                    New-DbaAgentJobCategory -SqlInstance $instance -Category $Category
+                                    $server.JobServer.Refresh()
+                                    New-DbaAgentJobCategory -SqlInstance $server -Category $Category
                                 } catch {
                                     Stop-Function -Message "Couldn't create job category $Category from $instance" -Target $instance -Continue -ErrorRecord $_
                                 }
@@ -405,6 +406,8 @@ function New-DbaAgentJob {
                     Stop-Function -Message "Something went wrong creating the job" -Target $currentjob -ErrorRecord $_ -Continue
                 }
             }
+
+            Add-TeppCacheItem -SqlInstance $server -Type job -Name $Job
 
             # Return the job
             $currentjob

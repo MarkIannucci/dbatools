@@ -134,7 +134,6 @@ function Get-DbaKbUpdate {
 
                 $guids = $results.Links |
                     Where-Object ID -match '_link' |
-                    Where-Object { $_.OuterHTML -match ( "(?=.*" + ( $Filter -join ")(?=.*" ) + ")" ) } |
                     ForEach-Object { $_.id.replace('_link', '') } |
                     Where-Object { $_ -in $kbids }
 
@@ -142,7 +141,7 @@ function Get-DbaKbUpdate {
                     Write-Message -Level Verbose -Message "Downloading information for $guid"
                     $post = @{ size = 0; updateID = $guid; uidInfo = $guid } | ConvertTo-Json -Compress
                     $body = @{ updateIDs = "[$post]" }
-                    $downloaddialog = Invoke-TlsWebRequest -Uri 'http://www.catalog.update.microsoft.com/DownloadDialog.aspx' -Method Post -Body $body -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content
+                    $downloaddialog = Invoke-TlsWebRequest -Uri 'https://www.catalog.update.microsoft.com/DownloadDialog.aspx' -Method Post -Body $body -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content
 
                     # sorry, don't know regex. this is ugly af.
                     $title = Get-Info -Text $downloaddialog -Pattern 'enTitle ='
@@ -192,7 +191,7 @@ function Get-DbaKbUpdate {
                     $links = $downloaddialog | Select-String -AllMatches -Pattern "(http[s]?\://download\.windowsupdate\.com\/[^\'\""]*)" | Select-Object -Unique
 
                     foreach ($link in $links) {
-                        $build = Get-DbaBuildReference -Kb "KB$kb" -WarningAction SilentlyContinue
+                        $build = Get-DbaBuild -Kb "KB$kb" -WarningAction SilentlyContinue
                         $properties = $baseproperties
 
                         if (-not $build.NameLevel) {

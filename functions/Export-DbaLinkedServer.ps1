@@ -86,12 +86,18 @@ function Export-DbaLinkedServer {
     }
     process {
         if (Test-FunctionInterrupt) { return }
+
+        if ($IsLinux -or $IsMacOS) {
+            Stop-Function -Message "This command is not supported on Linux or macOS"
+            return
+        }
+
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $sqlcredential -MinimumVersion 9
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 9
                 $InputObject += $server.LinkedServers
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             if ($LinkedServer) {
@@ -103,18 +109,18 @@ function Export-DbaLinkedServer {
                 continue
             }
 
-            if (!(Test-SqlSa -SqlInstance $instance -SqlCredential $sqlcredential)) {
+            if (!(Test-SqlSa -SqlInstance $instance -SqlCredential $SqlCredential)) {
                 Stop-Function -Message "Not a sysadmin on $instance. Quitting." -Target $instance -Continue
             }
 
-            Write-Message -Level Verbose -Message "Getting NetBios name for $instance."
-            $sourceNetBios = Resolve-NetBiosName $server
+            Write-Message -Level Verbose -Message "Getting FullComputerName name for $instance."
+            $fullComputerName = Resolve-DbaComputerName -ComputerName $instance -Credential $Credential
 
             Write-Message -Level Verbose -Message "Checking if Remote Registry is enabled on $instance."
             try {
-                Invoke-Command2 -Raw -Credential $Credential -ComputerName $sourceNetBios -ScriptBlock { Get-ItemProperty -Path "HKLM:\SOFTWARE\" } -ErrorAction Stop
+                Invoke-Command2 -Raw -Credential $Credential -ComputerName $fullComputerName -ScriptBlock { Get-ItemProperty -Path "HKLM:\SOFTWARE\" } -ErrorAction Stop
             } catch {
-                Stop-Function -Message "Can't connect to registry on $instance." -Target $sourceNetBios -ErrorRecord $_
+                Stop-Function -Message "Can't connect to registry on $instance." -Target $fullComputerName -ErrorRecord $_
                 return
             }
 
@@ -136,8 +142,10 @@ function Export-DbaLinkedServer {
                     if ($currentls.Password) {
                         $tempsql = $ls.Script()
                         foreach ($map in $currentls) {
-                            $rmtuser = $map.Identity.Replace("'", "''")
-                            $password = $map.Password.Replace("'", "''")
+                            if ($map.Identity -isnot [dbnull]) {
+                                $rmtuser = $map.Identity.Replace("'", "''")
+                                $password = $map.Password.Replace("'", "''")
+                            }
                             $tempsql = $tempsql.Replace(' /* For security reasons the linked server remote logins password is changed with ######## */', '')
                             $tempsql = $tempsql.Replace("rmtuser=N'$rmtuser',@rmtpassword='########'", "rmtuser=N'$rmtuser',@rmtpassword='$password'")
                         }

@@ -68,24 +68,37 @@ function Test-DbaTempDbConfig {
     process {
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 9
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 9
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             # removed previous assumption that 2016+ will have it enabled
             $tfCheck = $server.Databases['tempdb'].Query("DBCC TRACEON (3604);DBCC TRACESTATUS(-1)")
             $current = ($tfCheck.TraceFlag -join ',').Contains('1118')
 
-            [PSCustomObject]@{
-                ComputerName   = $server.ComputerName
-                InstanceName   = $server.ServiceName
-                SqlInstance    = $server.DomainInstanceName
-                Rule           = 'TF 1118 Enabled'
-                Recommended    = $true
-                CurrentSetting = $current
-                IsBestPractice = $current -eq $true
-                Notes          = 'KB328551 describes how TF 1118 can benefit performance. SQL Server 2016 has this functionality enabled by default.'
+            If ($server.VersionMajor -gt 12) {
+                [PSCustomObject]@{
+                    ComputerName   = $server.ComputerName
+                    InstanceName   = $server.ServiceName
+                    SqlInstance    = $server.DomainInstanceName
+                    Rule           = 'TF 1118 Enabled'
+                    Recommended    = $false
+                    CurrentSetting = $current
+                    IsBestPractice = $true
+                    Notes          = 'SQL Server 2016 and above has this functionality enabled by default.'
+                }
+            } else {
+                [PSCustomObject]@{
+                    ComputerName   = $server.ComputerName
+                    InstanceName   = $server.ServiceName
+                    SqlInstance    = $server.DomainInstanceName
+                    Rule           = 'TF 1118 Enabled'
+                    Recommended    = $true
+                    CurrentSetting = $current
+                    IsBestPractice = $current -eq $true
+                    Notes          = 'KB328551 describes how TF 1118 can benefit performance. SQL Server 2016 has this functionality enabled by default.'
+                }
             }
 
             Write-Message -Level Verbose -Message "TF 1118 evaluated"

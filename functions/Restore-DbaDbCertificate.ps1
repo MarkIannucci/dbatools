@@ -78,9 +78,9 @@ function Restore-DbaDbCertificate {
     )
     process {
         try {
-            $server = Connect-SqlInstance -SqlInstance $SqlInstance -SqlCredential $SqlCredential
+            $server = Connect-DbaInstance -SqlInstance $SqlInstance -SqlCredential $SqlCredential
         } catch {
-            Stop-Function -Message "Failed to connect to: $SqlInstance" -Target $SqlInstance -ErrorRecord $_
+            Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $SqlInstance
             return
         }
 
@@ -116,16 +116,16 @@ function Restore-DbaDbCertificate {
                     Write-Message -Level Verbose -Message "Private key: $privatekey"
                     try {
                         if ($EncryptionPassword) {
-                            $smocert.Create($fullcertname, 1, $privatekey, [System.Runtime.InteropServices.marshal]::PtrToStringAuto([System.Runtime.InteropServices.marshal]::SecureStringToBSTR($DecryptionPassword)), [System.Runtime.InteropServices.marshal]::PtrToStringAuto([System.Runtime.InteropServices.marshal]::SecureStringToBSTR($EncryptionPassword)))
+                            $smocert.Create($fullcertname, 1, $privatekey, ($DecryptionPassword | ConvertFrom-SecurePass), ($EncryptionPassword | ConvertFrom-SecurePass))
                         } else {
-                            $smocert.Create($fullcertname, 1, $privatekey, [System.Runtime.InteropServices.marshal]::PtrToStringAuto([System.Runtime.InteropServices.marshal]::SecureStringToBSTR($DecryptionPassword)))
+                            $smocert.Create($fullcertname, 1, $privatekey, ($DecryptionPassword | ConvertFrom-SecurePass))
                         }
                     } catch {
                         try {
                             if ($EncryptionPassword) {
-                                $smocert.Create($fullcertname, $([Microsoft.SqlServer.Management.Smo.CertificateSourceType]::"File"), $privatekey, [System.Runtime.InteropServices.marshal]::PtrToStringAuto([System.Runtime.InteropServices.marshal]::SecureStringToBSTR($DecryptionPassword)), [System.Runtime.InteropServices.marshal]::PtrToStringAuto([System.Runtime.InteropServices.marshal]::SecureStringToBSTR($EncryptionPassword)))
+                                $smocert.Create($fullcertname, $([Microsoft.SqlServer.Management.Smo.CertificateSourceType]::"File"), $privatekey, ($DecryptionPassword | ConvertFrom-SecurePass), ($EncryptionPassword | ConvertFrom-SecurePass))
                             } else {
-                                $smocert.Create($fullcertname, $([Microsoft.SqlServer.Management.Smo.CertificateSourceType]::"File"), $privatekey, [System.Runtime.InteropServices.marshal]::PtrToStringAuto([System.Runtime.InteropServices.marshal]::SecureStringToBSTR($DecryptionPassword)))
+                                $smocert.Create($fullcertname, $([Microsoft.SqlServer.Management.Smo.CertificateSourceType]::"File"), $privatekey, ($DecryptionPassword | ConvertFrom-SecurePass))
                             }
                         } catch {
                             Stop-Function -Message $_ -ErrorRecord $_ -Target $instance -Continue

@@ -71,11 +71,6 @@ function New-DbaDbUser {
 
         Creates a new sql user named user1 mapped to Login1 in the specified database.
 
-    .EXAMPLE
-        PS C:\> Get-DbaDbUser -SqlInstance sqlserver1 -Database DB1 | New-DbaDbUser -SqlInstance sqlserver2 -Database DB1
-
-        Copies users from sqlserver1.DB1 to sqlserver2.DB1. Does not copy permissions!
-
     #>
     [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = "NoLogin", ConfirmImpact = "Medium")]
     param(
@@ -145,9 +140,9 @@ function New-DbaDbUser {
     process {
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             $databases = $server.Databases | Where-Object IsAccessible -eq $true
