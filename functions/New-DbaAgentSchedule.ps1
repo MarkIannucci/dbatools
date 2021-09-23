@@ -29,15 +29,21 @@ function New-DbaAgentSchedule {
     .PARAMETER FrequencyType
         A value indicating when a job is to be executed.
 
-        Allowed values: Once, Daily, Weekly, Monthly, MonthlyRelative, AgentStart or IdleComputer
+        Allowed values: 'Once', 'OneTime', 'Daily', 'Weekly', 'Monthly', 'MonthlyRelative', 'AgentStart', 'AutoStart', 'IdleComputer', 'OnIdle'
+
+        The following synonyms provide flexibility to the allowed values for this function parameter:
+        Once=OneTime
+        AgentStart=AutoStart
+        IdleComputer=OnIdle
 
         If force is used the default will be "Once".
 
     .PARAMETER FrequencyInterval
         The days that a job is executed
 
-        Allowed values: Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Weekdays, Weekend or EveryDay.
-        The other allowed values are the numbers 1 to 31 for each day of the month.
+        Allowed values for FrequencyType 'Daily': EveryDay or a number between 1 and 365.
+        Allowed values for FrequencyType 'Weekly': Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Weekdays, Weekend or EveryDay.
+        Allowed values for FrequencyType 'Monthly': Numbers 1 to 31 for each day of the month.
 
         If "Weekdays", "Weekend" or "EveryDay" is used it over writes any other value that has been passed before.
 
@@ -46,7 +52,13 @@ function New-DbaAgentSchedule {
     .PARAMETER FrequencySubdayType
         Specifies the units for the subday FrequencyInterval.
 
-        Allowed values: Time, Seconds, Minutes, or Hours
+        Allowed values: 'Once', 'Time', 'Seconds', 'Second', 'Minutes', 'Minute', 'Hours', 'Hour'
+
+        The following synonyms provide flexibility to the allowed values for this function parameter:
+        Once=Time
+        Seconds=Second
+        Minutes=Minute
+        Hours=Hour
 
     .PARAMETER FrequencySubdayInterval
         The number of subday type periods to occur between each execution of a job.
@@ -132,11 +144,10 @@ function New-DbaAgentSchedule {
         [object[]]$Job,
         [object]$Schedule,
         [switch]$Disabled,
-        [ValidateSet('Once', 'Daily', 'Weekly', 'Monthly', 'MonthlyRelative', 'AgentStart', 'IdleComputer')]
+        [ValidateSet('Once', 'OneTime', 'Daily', 'Weekly', 'Monthly', 'MonthlyRelative', 'AgentStart', 'AutoStart', 'IdleComputer', 'OnIdle')]
         [object]$FrequencyType,
-        [ValidateSet('EveryDay', 'Weekdays', 'Weekend', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)]
         [object[]]$FrequencyInterval,
-        [ValidateSet('Time', 'Seconds', 'Minutes', 'Hours')]
+        [ValidateSet('Once', 'Time', 'Seconds', 'Second', 'Minutes', 'Minute', 'Hours', 'Hour')]
         [object]$FrequencySubdayType,
         [int]$FrequencySubdayInterval,
         [ValidateSet('Unused', 'First', 'Second', 'Third', 'Fourth', 'Last')]
@@ -162,30 +173,33 @@ function New-DbaAgentSchedule {
         [int]$interval = 0
 
         # Translate FrequencyType value from string to the integer value
-        if (!$FrequencyType -or $FrequencyType) {
-            [int]$FrequencyType =
-            switch ($FrequencyType) {
-                "Once" { 1 }
-                "Daily" { 4 }
-                "Weekly" { 8 }
-                "Monthly" { 16 }
-                "MonthlyRelative" { 32 }
-                "AgentStart" { 64 }
-                "IdleComputer" { 128 }
-                default { 1 }
-            }
+        [int]$FrequencyType =
+        switch ($FrequencyType) {
+            "Once" { 1 }
+            "OneTime" { 1 }
+            "Daily" { 4 }
+            "Weekly" { 8 }
+            "Monthly" { 16 }
+            "MonthlyRelative" { 32 }
+            "AgentStart" { 64 }
+            "AutoStart" { 64 }
+            "IdleComputer" { 128 }
+            "OnIdle" { 128 }
+            default { 1 }
         }
 
         # Translate FrequencySubdayType value from string to the integer value
-        if (!$FrequencySubdayType -or $FrequencySubdayType) {
-            [int]$FrequencySubdayType =
-            switch ($FrequencySubdayType) {
-                "Time" { 1 }
-                "Seconds" { 2 }
-                "Minutes" { 4 }
-                "Hours" { 8 }
-                default { 1 }
-            }
+        [int]$FrequencySubdayType =
+        switch ($FrequencySubdayType) {
+            "Once" { 1 }
+            "Time" { 1 }
+            "Seconds" { 2 }
+            "Second" { 2 }
+            "Minutes" { 4 }
+            "Minute" { 4 }
+            "Hours" { 8 }
+            "Hour" { 8 }
+            default { 1 }
         }
 
         # Check if the relative FrequencyInterval value is of type string and set the integer value
@@ -200,9 +214,9 @@ function New-DbaAgentSchedule {
             default { 0 }
         }
 
-        # Check if the interval is valid
-        if (($FrequencyType -in 4, "Daily") -and (($FrequencyInterval -lt 1 -or $FrequencyInterval -ge 365) -and -not $FrequencyInterval -eq "EveryDay")) {
-            Stop-Function -Message "The frequency interval $FrequencyInterval requires a frequency interval to be between 1 and 365." -Target $SqlInstance
+        # Check if the interval for daily frequency is valid
+        if (($FrequencyType -eq 4) -and ($FrequencyInterval -lt 1 -or $FrequencyInterval -ge 365) -and (-not ($FrequencyInterval -eq "EveryDay")) -and (-not $Force)) {
+            Stop-Function -Message "The daily frequency type requires a frequency interval to be between 1 and 365 or 'EveryDay'." -Target $SqlInstance
             return
         }
 
@@ -227,16 +241,13 @@ function New-DbaAgentSchedule {
         }
 
         # If the FrequencyInterval is set for the daily FrequencyType
-        if ($FrequencyType -in 4, 'Daily') {
+        if ($FrequencyType -eq 4) {
             # Create the interval to hold the value(s)
-            [int]$interval = 0
+            [int]$interval = 1
 
-            # Create the interval to hold the value(s)
-            switch ($FrequencyInterval) {
-                "EveryDay" { $interval = 1 }
-                default { $interval = 1 }
+            if ($FrequencyInterval -and $FrequencyInterval[0].GetType().Name -eq 'Int32') {
+                $interval = $FrequencyInterval[0]
             }
-
         }
 
         # If the FrequencyInterval is set for the weekly FrequencyType
@@ -280,13 +291,10 @@ function New-DbaAgentSchedule {
 
             # Loop through the array
             foreach ($item in $FrequencyInterval) {
-                $FrequencyInterval
                 switch ($item) {
                     { [int]$_ -ge 1 -and [int]$_ -le 31 } { $interval = [int]$item }
                 }
             }
-
-
         }
 
         # If the FrequencyInterval is set for the relative monthly FrequencyInterval
@@ -419,11 +427,10 @@ function New-DbaAgentSchedule {
         if (Test-FunctionInterrupt) { return }
 
         foreach ($instance in $SqlInstance) {
-            # Try connecting to the instance
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             # Check if the jobs parameter is set
@@ -446,7 +453,7 @@ function New-DbaAgentSchedule {
                                 if ($Force) {
                                     if ($PSCmdlet.ShouldProcess($instance, "Removing the schedule $Schedule on $instance")) {
                                         # Removing schedule
-                                        Remove-DbaAgentSchedule -SqlInstance $instance -SqlCredential $SqlCredential -Schedule $Schedule -Force:$Force
+                                        Remove-DbaAgentSchedule -SqlInstance $instance -SqlCredential $SqlCredential -Schedule $Schedule -Force:$Force -Confirm:$false
                                     }
                                 } else {
                                     Stop-Function -Message "Schedule $Schedule already exists for job $j on instance $instance" -Target $instance -ErrorRecord $_ -Continue
@@ -533,6 +540,8 @@ function New-DbaAgentSchedule {
 
                             }
 
+                            Add-TeppCacheItem -SqlInstance $server -Type schedule -Name $Schedule
+
                             $JobSchedule
                         }
                     }
@@ -612,6 +621,8 @@ function New-DbaAgentSchedule {
                     } catch {
                         Stop-Function -Message "Something went wrong adding the schedule." -Target $instance -ErrorRecord $_ -Continue
                     }
+
+                    Add-TeppCacheItem -SqlInstance $server -Type schedule -Name $Schedule
 
                     # Output the job schedule
                     $JobSchedule

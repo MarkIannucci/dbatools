@@ -221,15 +221,33 @@ function Set-DbaAgentJob {
             return
         }
 
-        # Check the e-mail operator name
+        # Check the e-mail level parameter
+        if ($EmailOperator -and ($null -eq $EmailLevel)) {
+            Stop-Function -Message "Please set the e-mail level parameter when the e-mail level operator is set." -Target $SqlInstance
+            return
+        }
+
+        # Check the net send operator name
         if (($NetsendLevel -ge 1) -and (-not $NetsendOperator)) {
             Stop-Function -Message "Please set the netsend operator when the netsend level parameter is set." -Target $SqlInstance
             return
         }
 
-        # Check the e-mail operator name
+        # Check the net send level parameter
+        if ($NetsendOperator -and ($null -eq $NetsendLevel)) {
+            Stop-Function -Message "Please set the net send level parameter when the net send level operator is set." -Target $SqlInstance
+            return
+        }
+
+        # Check the page operator name
         if (($PageLevel -ge 1) -and (-not $PageOperator)) {
             Stop-Function -Message "Please set the page operator when the page level parameter is set." -Target $SqlInstance
+            return
+        }
+
+        # Check the page level parameter
+        if ($PageOperator -and ($null -eq $PageLevel)) {
+            Stop-Function -Message "Please set the page level parameter when the page level operator is set." -Target $SqlInstance
             return
         }
     }
@@ -244,11 +262,10 @@ function Set-DbaAgentJob {
         }
 
         foreach ($instance in $SqlInstance) {
-            # Try connecting to the instance
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             foreach ($j in $Job) {
@@ -276,8 +293,9 @@ function Set-DbaAgentJob {
             #region job options
             # Settings the options for the job
             if ($NewName) {
-                Write-Message -Message "Setting job name to $NewName" -Level Verbose
-                $currentjob.Rename($NewName)
+                if ($PSCmdlet.ShouldProcess($server, "Setting job name of $($currentjob.Name) to $NewName")) {
+                    $currentjob.Rename($NewName)
+                }
             }
 
             if ($Schedule) {
@@ -288,8 +306,9 @@ function Set-DbaAgentJob {
                         $sID = $server.JobServer.SharedSchedules[$s].ID
 
                         # Add schedule to job
-                        Write-Message -Message "Adding schedule id $sID to job" -Level Verbose
-                        $currentjob.AddSharedSchedule($sID)
+                        if ($PSCmdlet.ShouldProcess($server, "Adding schedule id $sID to job $($currentjob.Name)")) {
+                            $currentjob.AddSharedSchedule($sID)
+                        }
                     } else {
                         Stop-Function -Message "Schedule $s cannot be found on instance $instance" -Target $s -Continue
                     }
@@ -303,9 +322,9 @@ function Set-DbaAgentJob {
                     # Check if the schedule is
                     if ($server.JobServer.SharedSchedules.ID -contains $sID) {
                         # Add schedule to job
-                        Write-Message -Message "Adding schedule id $sID to job" -Level Verbose
-                        $currentjob.AddSharedSchedule($sID)
-
+                        if ($PSCmdlet.ShouldProcess($server, "Adding schedule id $sID to job $($currentjob.Name)")) {
+                            $currentjob.AddSharedSchedule($sID)
+                        }
                     } else {
                         Stop-Function -Message "Schedule ID $sID cannot be found on instance $instance" -Target $sID -Continue
                     }
@@ -334,7 +353,7 @@ function Set-DbaAgentJob {
                         if ($PSCmdlet.ShouldProcess($instance, "Creating job category on $instance")) {
                             try {
                                 # Create the category
-                                New-DbaAgentJobCategory -SqlInstance $instance -Category $Category
+                                New-DbaAgentJobCategory -SqlInstance $server -Category $Category
 
                                 Write-Message -Message "Setting job category to $Category" -Level Verbose
                                 $currentjob.Category = $Category

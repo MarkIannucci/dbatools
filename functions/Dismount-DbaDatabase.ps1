@@ -90,9 +90,9 @@ function Dismount-DbaDatabase {
     process {
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $sqlcredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             if ($Database) {
@@ -174,7 +174,7 @@ function Dismount-DbaDatabase {
                             Write-Message -Level Verbose -Message "Successfully removed $db from  detach from $ag on $server."
                         } catch {
                             if ($_.Exception.InnerException) {
-                                $exception = $_.Exception.InnerException.ToString() -Split "System.Data.SqlClient.SqlException: "
+                                $exception = $_.Exception.InnerException.ToString() -Split "Microsoft.Data.SqlClient.SqlException: "
                                 $exception = " | $(($exception[1] -Split "at Microsoft.SqlServer.Management.Common.ConnectionManager")[0])".TrimEnd()
                             }
 

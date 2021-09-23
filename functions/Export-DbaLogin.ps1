@@ -176,7 +176,7 @@ function Export-DbaLogin {
         [switch]$NoClobber,
         [switch]$Append,
         [string]$BatchSeparator = (Get-DbatoolsConfigValue -FullName 'Formatting.BatchSeparator'),
-        [ValidateSet('SQLServer2000', 'SQLServer2005', 'SQLServer2008/2008R2', 'SQLServer2012', 'SQLServer2014', 'SQLServer2016', 'SQLServer2017')]
+        [ValidateSet('SQLServer2000', 'SQLServer2005', 'SQLServer2008/2008R2', 'SQLServer2012', 'SQLServer2014', 'SQLServer2016', 'SQLServer2017', 'SQLServer2019')]
         [string]$DestinationVersion,
         [switch]$NoPrefix,
         [switch]$Passthru,
@@ -189,9 +189,14 @@ function Export-DbaLogin {
         $outsql = @()
         $instanceArray = @()
         $logonCollection = New-Object System.Collections.ArrayList
-        $executingUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        if ($IsLinux -or $IsMacOs) {
+            $executingUser = $env:USER
+        } else {
+            $executingUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        }
         $commandName = $MyInvocation.MyCommand.Name
 
+        $eol = [System.Environment]::NewLine
     }
     process {
         if (Test-FunctionInterrupt) { return }
@@ -210,11 +215,15 @@ function Export-DbaLogin {
             switch ($inputType) {
                 'Sqlcollaborative.Dbatools.Parameter.DbaInstanceParameter' {
                     Write-Message -Level Verbose -Message "Processing Server through InputObject"
-                    $server = Connect-SqlInstance -SqlInstance $input -SqlCredential $sqlcredential
+                    try {
+                        $server = Connect-DbaInstance -SqlInstance $input -SqlCredential $SqlCredential
+                    } catch {
+                        Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $input -Continue
+                    }
                 }
                 'Microsoft.SqlServer.Management.Smo.Server' {
                     Write-Message -Level Verbose -Message "Processing Server through InputObject"
-                    $server = Connect-SqlInstance -SqlInstance $input -SqlCredential $sqlcredential
+                    $server = Connect-DbaInstance -SqlInstance $input -SqlCredential $SqlCredential
                 }
                 'Microsoft.SqlServer.Management.Smo.Database' {
                     Write-Message -Level Verbose -Message "Processing Database through InputObject"
@@ -301,7 +310,7 @@ function Export-DbaLogin {
                         Write-Message -Level Verbose -Message "Exporting $userName"
                     }
 
-                    $outsql += "`r`nUSE master`r`n"
+                    $outsql += "$($eol)USE master$eol"
                     # Getting some attributes
                     if ($DefaultDatabase) {
                         $defaultDb = $DefaultDatabase
@@ -408,7 +417,7 @@ function Export-DbaLogin {
 
                     foreach ($ownedJob in $ownedJobs) {
                         $ownedJob = $ownedJob -replace ("'", "''")
-                        $outsql += "`r`nUSE msdb`r`n"
+                        $outsql += "$($eol)USE msdb$eol"
                         $outsql += "EXEC msdb.dbo.sp_update_job @job_name=N'$ownedJob', @owner_login_name=N'$userName'"
                     }
                 }
@@ -418,7 +427,7 @@ function Export-DbaLogin {
                     # Securables: Connect SQL, View any database, Administer Bulk Operations, etc.
 
                     $perms = $server.EnumServerPermissions($userName)
-                    $outsql += "`r`nUSE master`r`n"
+                    $outsql += "$($eol)USE master$eol"
                     foreach ($perm in $perms) {
                         $permState = $perm.permissionstate
                         $permType = $perm.PermissionType
@@ -459,18 +468,19 @@ function Export-DbaLogin {
                         $sourceDb = $server.Databases[$dbName]
                         $dbUserName = $db.username
 
-                        $outsql += "`r`nUSE [$dbName]`r`n"
+                        $outsql += "$($eol)USE [$dbName]$eol"
+
+                        $scriptOptions = New-DbaScriptingOption
+                        $scriptVersion = $sourceDb.CompatibilityLevel
+                        $scriptOptions.TargetServerVersion = [Microsoft.SqlServer.Management.Smo.SqlServerVersion]::$scriptVersion
+                        $scriptOptions.ContinueScriptingOnError = $false
+                        $scriptOptions.IncludeDatabaseContext = $false
+                        $scriptOptions.IncludeIfNotExists = $true
 
                         if ($ObjectLevel) {
                             # Exporting all permissions
-                            $scriptOptions = New-DbaScriptingOption
-                            $scriptVersion = $sourceDb.CompatibilityLevel
-                            $scriptOptions.TargetServerVersion = [Microsoft.SqlServer.Management.Smo.SqlServerVersion]::$scriptVersion
                             $scriptOptions.AllowSystemObjects = $true
                             $scriptOptions.IncludeDatabaseRoleMemberships = $true
-                            $scriptOptions.ContinueScriptingOnError = $false
-                            $scriptOptions.IncludeDatabaseContext = $false
-                            $scriptOptions.IncludeIfNotExists = $true
 
                             $exportSplat = @{
                                 SqlInstance            = $server
@@ -491,7 +501,7 @@ function Export-DbaLogin {
                             }
                         } else {
                             try {
-                                $sql = $server.Databases[$dbName].Users[$dbUserName].Script()
+                                $sql = $server.Databases[$dbName].Users[$dbUserName].Script($scriptOptions)
                                 $outsql += $sql
                             } catch {
                                 Write-Message -Level Warning -Message "User cannot be found in selected database"
@@ -545,13 +555,13 @@ function Export-DbaLogin {
             if ($NoPrefix) {
                 $prefix = $null
             } else {
-                $prefix = "/*`r`n`tCreated by $executingUser using dbatools $commandName for objects on $($login.Instance) at $(Get-Date -Format (Get-DbatoolsConfigValue -FullName 'Formatting.DateTime'))`r`n`tSee https://dbatools.io/$commandName for more information`r`n*/"
+                $prefix = "/*$eol`tCreated by $executingUser using dbatools $commandName for objects on $($login.Instance) at $(Get-Date -Format (Get-DbatoolsConfigValue -FullName 'Formatting.DateTime'))$eol`tSee https://dbatools.io/$commandName for more information$eol*/"
             }
 
             if ($BatchSeparator) {
-                $sql = $login.SQL -join "`r`n$BatchSeparator`r`n"
+                $sql = $login.SQL -join "$eol$BatchSeparator$eol"
                 #add the final GO
-                $sql += "`r`n$BatchSeparator"
+                $sql += "$eol$BatchSeparator"
             } else {
                 $sql = $login.SQL
             }

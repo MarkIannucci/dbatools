@@ -33,12 +33,12 @@ function Invoke-DbaQuery {
         Specify one or more SQL objects. Those will be converted to script and their scripts run on the target system(s).
 
     .PARAMETER As
-        Specifies output type. Valid options for this parameter are 'DataSet', 'DataTable', 'DataRow', 'PSObject', and 'SingleValue'
+        Specifies output type. Valid options for this parameter are 'DataSet', 'DataTable', 'DataRow', 'PSObject', 'PSObjectArray', and 'SingleValue'.
 
-        PSObject output introduces overhead but adds flexibility for working with results: http://powershell.org/wp/forums/topic/dealing-with-dbnull/
+        PSObject and PSObjectArray output introduces overhead but adds flexibility for working with results: https://forums.powershell.org/t/dealing-with-dbnull/2328/2
 
-    .PARAMETER SqlParameters
-        Specifies a hashtable of parameters for parameterized SQL queries.  http://blog.codinghorror.com/give-me-parameterized-sql-or-give-me-death/
+    .PARAMETER SqlParameter
+        Specifies a hashtable of parameters or output from New-DbaSqlParameter for parameterized SQL queries.  http://blog.codinghorror.com/give-me-parameterized-sql-or-give-me-death/
 
     .PARAMETER AppendServerInstance
         If this switch is enabled, the SQL Server instance will be appended to PSObject and DataRow output.
@@ -58,7 +58,8 @@ function Invoke-DbaQuery {
         Execute the query with ReadOnly application intent.
 
     .PARAMETER CommandType
-        Specifies the type of command represented by the query string.  Default is Text
+        Specifies the type of command represented by the query string. Valid options for this parameter are 'Text', 'TableDirect', and 'StoredProcedure'.
+        Default is 'Text'. Further information: https://docs.microsoft.com/en-us/dotnet/api/system.data.sqlclient.sqlcommand.commandtype
 
     .NOTES
         Tags: Database, Query
@@ -92,7 +93,7 @@ function Invoke-DbaQuery {
         Runs the sql commands stored in rebuild.sql against all accessible databases of the instances "server1", "server1\nordwind" and "server2"
 
     .EXAMPLE
-        PS C:\> Invoke-DbaQuery -SqlInstance . -Query 'SELECT * FROM users WHERE Givenname = @name' -SqlParameters @{ Name = "Maria" }
+        PS C:\> Invoke-DbaQuery -SqlInstance . -Query 'SELECT * FROM users WHERE Givenname = @name' -SqlParameter @{ Name = "Maria" }
 
         Executes a simple query against the users table using SQL Parameters.
         This avoids accidental SQL Injection and is the safest way to execute queries with dynamic content.
@@ -105,7 +106,7 @@ function Invoke-DbaQuery {
         Executes a query with ReadOnly application intent on aglistener1.
 
     .EXAMPLE
-        PS C:\> Invoke-DbaQuery -SqlInstance "server1" -Database tempdb -Query "Example_SP" -SqlParameters @{ Name = "Maria" } -CommandType StoredProcedure
+        PS C:\> Invoke-DbaQuery -SqlInstance "server1" -Database tempdb -Query "Example_SP" -SqlParameter @{ Name = "Maria" } -CommandType StoredProcedure
 
         Executes a stored procedure Example_SP using SQL Parameters
 
@@ -114,13 +115,39 @@ function Invoke-DbaQuery {
             "StartDate" = $startdate;
             "EndDate" = $enddate;
         };
-        PS C:\> Invoke-DbaQuery -SqlInstance "server1" -Database tempdb -Query "Example_SP" -SqlParameters $QueryParameters -CommandType StoredProcedure
+        PS C:\> Invoke-DbaQuery -SqlInstance "server1" -Database tempdb -Query "Example_SP" -SqlParameter $QueryParameters -CommandType StoredProcedure
 
         Executes a stored procedure Example_SP using multiple SQL Parameters
+
+    .EXAMPLE
+        PS C:\> $inparam = @()
+        PS C:\> $inparam += [pscustomobject]@{
+        >>     somestring = 'string1'
+        >>     somedate = '2021-07-15T01:02:00'
+        >> }
+        PS C:\> $inparam += [pscustomobject]@{
+        >>     somestring = 'string2'
+        >>     somedate = '2021-07-15T02:03:00'
+        >> }
+        >> $inparamAsDataTable = ConvertTo-DbaDataTable -InputObject $inparam
+        PS C:\> New-DbaSqlParameter -SqlDbType structured -Value $inparamAsDataTable -TypeName 'dbatools_tabletype'
+        PS C:\> Invoke-DbaQuery -SqlInstance localhost -Database master -CommandType StoredProcedure -Query my_proc -SqlParameter $inparamAsDataTable
+
+        Creates an TVP input parameter and uses it to invoke a stored procedure.
+
+    .EXAMPLE
+        PS C:\> $output = New-DbaSqlParameter -ParameterName json_result -SqlDbType NVarChar -Size -1 -Direction Output
+        PS C:\> Invoke-DbaQuery -SqlInstance localhost -Database master -CommandType StoredProcedure -Query my_proc -SqlParameter $output
+        PS C:\> $output.Value
+
+        Creates an output parameter and uses it to invoke a stored procedure.
     #>
     [CmdletBinding(DefaultParameterSetName = "Query")]
     param (
-        [parameter(ValueFromPipeline)]
+        [Parameter(ValueFromPipeline)]
+        [Parameter(ParameterSetName = 'Query', Position = 0)]
+        [Parameter(ParameterSetName = 'File', Position = 0)]
+        [Parameter(ParameterSetName = 'SMO', Position = 0)]
         [DbaInstance[]]$SqlInstance,
         [PsCredential]$SqlCredential,
         [string]$Database,
@@ -132,9 +159,10 @@ function Invoke-DbaQuery {
         [object[]]$File,
         [Parameter(Mandatory, ParameterSetName = "SMO")]
         [Microsoft.SqlServer.Management.Smo.SqlSmoObject[]]$SqlObject,
-        [ValidateSet("DataSet", "DataTable", "DataRow", "PSObject", "SingleValue")]
+        [ValidateSet("DataSet", "DataTable", "DataRow", "PSObject", "PSObjectArray", "SingleValue")]
         [string]$As = "DataRow",
-        [System.Collections.IDictionary]$SqlParameters,
+        [Alias("SqlParameters")]
+        [psobject[]]$SqlParameter,
         [System.Data.CommandType]$CommandType = 'Text',
         [switch]$AppendServerInstance,
         [switch]$MessagesToOutput,
@@ -147,13 +175,21 @@ function Invoke-DbaQuery {
     begin {
         Write-Message -Level Debug -Message "Bound parameters: $($PSBoundParameters.Keys -join ", ")"
 
+        if ($PSBoundParameters.SqlParameter) {
+            $first = $SqlParameter | Select-Object -First 1
+            if ($first -isnot [Microsoft.Data.SqlClient.SqlParameter] -and ($first -isnot [System.Collections.IDictionary] -or $SqlParameter -is [System.Collections.IDictionary[]])) {
+                Stop-Function -Message "SqlParameter only accepts a single hashtable or Microsoft.Data.SqlClient.SqlParameter"
+                return
+            }
+        }
+
         $splatInvokeDbaSqlAsync = @{
             As          = $As
             CommandType = $CommandType
         }
 
-        if (Test-Bound -ParameterName "SqlParameters") {
-            $splatInvokeDbaSqlAsync["SqlParameters"] = $SqlParameters
+        if (Test-Bound -ParameterName "SqlParameter") {
+            $splatInvokeDbaSqlAsync["SqlParameter"] = $SqlParameter
         }
         if (Test-Bound -ParameterName "AppendServerInstance") {
             $splatInvokeDbaSqlAsync["AppendServerInstance"] = $AppendServerInstance
@@ -202,10 +238,10 @@ function Invoke-DbaQuery {
                     }
                     "System.String" {
                         try {
-                            if (Test-PsVersion -Is 3) {
+                            if (Test-PsVersion -Maximum 4) {
                                 $uri = [uri]$item
                             } else {
-                                $uri = [uri]::New($item)
+                                $uri = New-Object uri -ArgumentList $item
                             }
                             $uriScheme = $uri.Scheme
                         } catch {
@@ -246,7 +282,7 @@ function Invoke-DbaQuery {
                                                 return
                                             }
                                         } else {
-                                            if ([uri]::New($path).Scheme -ne 'file') {
+                                            if ((New-Object uri -ArgumentList $path).Scheme -ne 'file') {
                                                 Stop-Function -Message "Could not resolve path $path as filesystem object"
                                                 return
                                             }
@@ -333,14 +369,23 @@ function Invoke-DbaQuery {
             }
         }
         foreach ($instance in $SqlInstance) {
+            # Verbose output in Invoke-DbaQuery is special, because it's the only way to assure on all versions of Powershell to have separate outputs (results and messages) coming from the TSQL Query.
+            # We suppress the verbosity of all other functions in order to be sure the output is consistent with what you get, e.g., executing the same in SSMS
+            Write-Message -Level Debug -Message "SqlInstance passed in, will work on: $instance"
             try {
                 $connDbaInstanceParams = @{
                     SqlInstance   = $instance
                     SqlCredential = $SqlCredential
                     Database      = $Database
+                    Verbose       = $false
                 }
                 if ($ReadOnly) {
                     $connDbaInstanceParams.ApplicationIntent = "ReadOnly"
+                }
+                # Test for a windows credential and request a non-pooled connection in that case to keep the security context (see #7725 for details)
+                if ($SqlCredential.UserName -like '*\*' -or $SqlCredential.UserName -like '*@*') {
+                    Write-Message -Level Debug -Message "Windows credential detected, so requesting a non-pooled connection"
+                    $connDbaInstanceParams.NonPooledConnection = $true
                 }
                 $server = Connect-DbaInstance @connDbaInstanceParams
             } catch {
@@ -348,10 +393,12 @@ function Invoke-DbaQuery {
             }
             $conncontext = $server.ConnectionContext
             try {
-                if ($Database -and $conncontext.DatabaseName -ne $Database) {
-                    #$conncontext = $server.ConnectionContext.Copy()
-                    #$conncontext.DatabaseName = $Database
-                    $conncontext = $server.ConnectionContext.Copy().GetDatabaseConnection($Database)
+                if (Get-DbatoolsConfigValue -FullName sql.connection.legacy) {
+                    if ($Database -and $conncontext.DatabaseName -ne $Database) {
+                        #$conncontext = $server.ConnectionContext.Copy()
+                        #$conncontext.DatabaseName = $Database
+                        $conncontext = $server.ConnectionContext.Copy().GetDatabaseConnection($Database)
+                    }
                 }
                 if ($File -or $SqlObject) {
                     foreach ($item in $files) {
@@ -365,6 +412,10 @@ function Invoke-DbaQuery {
                 }
             } catch {
                 Stop-Function -Message "[$instance] Failed during execution" -ErrorRecord $_ -Target $instance -Continue
+            }
+            if ($connDbaInstanceParams.NonPooledConnection) {
+                # Close non-pooled connection as this is not done automatically. If it is a reused Server SMO, connection will be opened again automatically on next request.
+                $null = $server | Disconnect-DbaInstance -Verbose:$false
             }
         }
     }

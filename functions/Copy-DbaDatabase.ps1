@@ -279,7 +279,9 @@ function Copy-DbaDatabase {
             return
         }
 
-        if ($Force) { $ConfirmPreference = 'none' }
+        if ($Force) {
+            $ConfirmPreference = 'none'
+        }
 
         function Join-Path {
             <#
@@ -384,7 +386,7 @@ function Copy-DbaDatabase {
                     }
                     $d.logical = $file.Name
 
-                    $d.remotefilename = Join-AdminUNC $destNetBios $d.physical
+                    $d.remotefilename = Join-AdminUNC $destFullComputerName $d.physical
                     $destinstancefiles.add($file.Name, $d)
 
                     # Source File Structure
@@ -392,7 +394,7 @@ function Copy-DbaDatabase {
                     }
                     $s.logical = $file.Name
                     $s.physical = $file.filename
-                    $s.remotefilename = Join-AdminUNC $sourceNetBios $s.physical
+                    $s.remotefilename = Join-AdminUNC $sourceFullComputerName $s.physical
                     $sourcefiles.add($file.Name, $s)
                 }
 
@@ -422,11 +424,11 @@ function Copy-DbaDatabase {
                             if ($destServer.VersionMajor -lt 10) {
                                 $directory = "$directory\FTDATA"
                             }
-                            $fileName = Split-Path($physical) -leaf
+                            $fileName = Split-Path($physical) -Leaf
                             $d.physical = "$directory\$fileName"
                         }
                         $d.logical = $logical
-                        $d.remotefilename = Join-AdminUNC $destNetBios $d.physical
+                        $d.remotefilename = Join-AdminUNC $destFullComputerName $d.physical
                         $destinstancefiles.add($logical, $d)
 
                         # Source File Structure
@@ -439,7 +441,7 @@ function Copy-DbaDatabase {
 
                         $s.logical = $logical
                         $s.physical = $physical
-                        $s.remotefilename = Join-AdminUNC $sourceNetBios $s.physical
+                        $s.remotefilename = Join-AdminUNC $sourceFullComputerName $s.physical
                         $sourcefiles.add($logical, $s)
                     }
                 }
@@ -469,14 +471,14 @@ function Copy-DbaDatabase {
                         $d.physical = "$directory\$fileName"
                     }
                     $d.logical = $file.Name
-                    $d.remotefilename = Join-AdminUNC $destNetBios $d.physical
+                    $d.remotefilename = Join-AdminUNC $destFullComputerName $d.physical
                     $destinstancefiles.add($file.Name, $d)
 
                     $s = @{
                     }
                     $s.logical = $file.Name
                     $s.physical = $file.filename
-                    $s.remotefilename = Join-AdminUNC $sourceNetBios $s.physical
+                    $s.remotefilename = Join-AdminUNC $sourceFullComputerName $s.physical
                     $sourcefiles.add($file.Name, $s)
                 }
 
@@ -490,7 +492,7 @@ function Copy-DbaDatabase {
             $fileStructure = [pscustomobject]@{
                 "databases" = $dbcollection
             }
-            Write-Progress -id 1 -Activity "Processing database file structure" -Status "Completed" -Completed
+            Write-Progress -Id 1 -Activity "Processing database file structure" -Status "Completed" -Completed
             return $fileStructure
         }
 
@@ -605,26 +607,26 @@ function Copy-DbaDatabase {
                     $remotefilename = $dbdestination[$file].remotefilename
                     $from = $dbsource[$file].remotefilename
                     try {
-                        if (Test-Path $from -pathtype container) {
+                        if (Test-Path $from -PathType container) {
                             $null = New-Item -ItemType Directory -Path $remotefilename -Force
-                            Start-BitsTransfer -Source "$from\*.*" -Destination $remotefilename
+                            Start-BitsTransfer -Source "$from\*.*" -Destination $remotefilename -ErrorAction Stop
 
-                            $directories = (Get-ChildItem -recurse $from | Where-Object {
+                            $directories = (Get-ChildItem -Recurse $from | Where-Object {
                                     $_.PsIsContainer
                                 }).FullName
                             foreach ($directory in $directories) {
                                 $newdirectory = $directory.replace($from, $remotefilename)
                                 $null = New-Item -ItemType Directory -Path $newdirectory -Force
-                                Start-BitsTransfer -Source "$directory\*.*" -Destination $newdirectory
+                                Start-BitsTransfer -Source "$directory\*.*" -Destination $newdirectory -ErrorAction Stop
                             }
                         } else {
                             Write-Message -Level Verbose -Message "Copying $from for $dbName."
-                            Start-BitsTransfer -Source $from -Destination $remotefilename
+                            Start-BitsTransfer -Source $from -Destination $remotefilename -ErrorAction Stop
                         }
                     } catch {
                         try {
                             # Sometimes BITS trips out temporarily on cloned drives.
-                            Start-BitsTransfer -Source $from -Destination $remotefilename
+                            Start-BitsTransfer -Source $from -Destination $remotefilename -ErrorAction Stop
                         } catch {
                             Write-Message -Level Verbose -Message "Start-BitsTransfer did not succeed. Now attempting with Copy-Item - no progress bar will be shown."
                             try {
@@ -754,9 +756,9 @@ function Copy-DbaDatabase {
         }
 
         try {
-            $sourceServer = Connect-SqlInstance -SqlInstance $Source -SqlCredential $SourceSqlCredential
+            $sourceServer = Connect-DbaInstance -SqlInstance $Source -SqlCredential $SourceSqlCredential
         } catch {
-            Stop-Function -Message "Error occurred while establishing connection to $Source" -Category ConnectionError -ErrorRecord $_ -Target $Source
+            Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $Source
             return
         }
 
@@ -773,7 +775,10 @@ function Copy-DbaDatabase {
         }
 
         Invoke-SmoCheck -SqlInstance $sourceServer
-        $sourceNetBios = $sourceServer.ComputerName
+
+        # Fix #6600
+        $sourceFullComputerName = Resolve-DbaComputerName -ComputerName $sourceServer.ComputerName
+        Write-Message -Level Verbose -Message "Using $sourceFullComputerName as sourceFullComputerName."
 
         Write-Message -Level Verbose -Message "Ensuring user databases exist (counting databases)."
 
@@ -784,9 +789,9 @@ function Copy-DbaDatabase {
 
         foreach ($destinstance in $Destination) {
             try {
-                $destServer = Connect-SqlInstance -SqlInstance $destinstance -SqlCredential $DestinationSqlCredential
+                $destServer = Connect-DbaInstance -SqlInstance $destinstance -SqlCredential $DestinationSqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $destinstance" -Category ConnectionError -ErrorRecord $_ -Target $destinstance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $destinstance -Continue
             }
 
             if ($sourceServer.ComputerName -eq $destServer.ComputerName) {
@@ -854,7 +859,9 @@ function Copy-DbaDatabase {
                 }
             }
 
-            $destNetBios = $destserver.ComputerName
+            # Fix #6600
+            $destFullComputerName = Resolve-DbaComputerName -ComputerName $destserver.ComputerName
+            Write-Message -Level Verbose -Message "Using $destFullComputerName as destFullComputerName."
 
             Write-Message -Level Verbose -Message "Performing SMO version check."
             Invoke-SmoCheck -SqlInstance $destServer
@@ -911,7 +918,7 @@ function Copy-DbaDatabase {
 
             if ($DetachAttach -eq $true) {
                 Write-Message -Level Verbose -Message "Checking access to remote directories."
-                $remoteSourcePath = Join-AdminUNC $sourceNetBios (Get-SqlDefaultPaths -SqlInstance $sourceServer -filetype data)
+                $remoteSourcePath = Join-AdminUNC $sourceFullComputerName (Get-SqlDefaultPaths -SqlInstance $sourceServer -filetype data)
 
                 if ((Test-Path $remoteSourcePath) -ne $true -and $DetachAttach) {
                     Write-Message -Level Warning -Message "Can't access remote Sql directories on $source which is required to perform detach/copy/attach."
@@ -920,7 +927,7 @@ function Copy-DbaDatabase {
                     return
                 }
 
-                $remoteDestPath = Join-AdminUNC $destNetBios (Get-SqlDefaultPaths -SqlInstance $destServer -filetype data)
+                $remoteDestPath = Join-AdminUNC $destFullComputerName (Get-SqlDefaultPaths -SqlInstance $destServer -filetype data)
                 If ((Test-Path $remoteDestPath) -ne $true -and $DetachAttach) {
                     Write-Message -Level Warning -Message "Can't access remote Sql directories on $destinstance which is required to perform detach/copy/attach."
                     Write-Message -Level Warning -Message "You can manually try accessing $remoteDestPath to diagnose any issues."
@@ -1131,7 +1138,7 @@ function Copy-DbaDatabase {
                         continue
                     }
 
-                    if (($null -ne $destServer.Databases[$DestinationdbName]) -and !$force -and !$WithReplace) {
+                    if (($null -ne $destServer.Databases[$DestinationdbName]) -and !$force -and !$WithReplace -and !$Continue) {
                         if ($Pscmdlet.ShouldProcess($destinstance, "$DestinationdbName exists at destination. Use -Force to drop and migrate. Aborting routine for this database.")) {
                             Write-Message -Level Verbose -Message "$DestinationdbName exists at destination. Use -Force to drop and migrate. Aborting routine for this database."
 
@@ -1207,26 +1214,25 @@ function Copy-DbaDatabase {
                                     } else {
                                         $backupTmpResult = Backup-DbaDatabase -SqlInstance $sourceServer -Database $dbName -BackupDirectory $SharedPath -FileCount $numberfiles -CopyOnly:$CopyOnly
                                     }
-                                }
-                                if ($backupTmpResult) {
-                                    $backupCollection += $backupTmpResult
-                                }
-                                $backupResult = $BackupTmpResult.BackupComplete
-                                if (-not $backupResult) {
-                                    $serviceAccount = $sourceServer.ServiceAccount
-                                    Write-Message -Level Verbose -Message "Backup Failed. Does SQL Server account $serviceAccount have access to $($SharedPath)? Aborting routine for this database."
 
-                                    $copyDatabaseStatus.Status = "Failed"
-                                    $copyDatabaseStatus.Notes = "Backup failed. Verify service account access to $SharedPath."
-                                    $copyDatabaseStatus | Select-DefaultView -Property DateTime, SourceServer, DestinationServer, Name, Type, Status, Notes -TypeName MigrationObject
-                                    continue
+                                    if ((-not $backupTmpResult) -or (-not $backupTmpResult.BackupComplete)) {
+                                        $serviceAccount = $sourceServer.ServiceAccount
+                                        Write-Message -Level Verbose -Message "Backup Failed. Does SQL Server account $serviceAccount have access to $($SharedPath)? Aborting routine for this database."
+
+                                        $copyDatabaseStatus.Status = "Failed"
+                                        $copyDatabaseStatus.Notes = "Backup failed. Verify service account access to $SharedPath."
+                                        $copyDatabaseStatus | Select-DefaultView -Property DateTime, SourceServer, DestinationServer, Name, Type, Status, Notes -TypeName MigrationObject
+                                        continue
+                                    }
+
+                                    $backupCollection += $backupTmpResult
                                 }
                             }
                             Write-Message -Level Verbose -Message "Reuse = $ReuseSourceFolderStructure."
                             try {
                                 $msg = $null
                                 if ($miRestore) {
-                                    $restoreResultTmp = $backupTmpResult | Restore-DbaDatabase -SqlInstance $destServer -DatabaseName $DestinationdbName -TrustDbBackupHistory -WithReplace:$WithReplace  -EnableException -AzureCredential $AzureCredential
+                                    $restoreResultTmp = $backupTmpResult | Restore-DbaDatabase -SqlInstance $destServer -DatabaseName $DestinationdbName -TrustDbBackupHistory -WithReplace:$WithReplace -EnableException -AzureCredential $AzureCredential
                                 } else {
                                     $restoreResultTmp = $backupTmpResult | Restore-DbaDatabase -SqlInstance $destServer -DatabaseName $DestinationdbName -ReuseSourceFolderStructure:$ReuseSourceFolderStructure -NoRecovery:$NoRecovery -TrustDbBackupHistory -WithReplace:$WithReplace -Continue:$Continue -EnableException -ReplaceDbNameInFile -AzureCredential $AzureCredential -KeepCDC:$KeepCDC -KeepReplication:$KeepReplication
                                 }

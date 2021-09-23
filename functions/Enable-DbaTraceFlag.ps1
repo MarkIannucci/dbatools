@@ -4,7 +4,8 @@ function Enable-DbaTraceFlag {
         Enable Global Trace Flag(s)
 
     .DESCRIPTION
-        The function will set one or multiple trace flags on the SQL Server instance(s) listed
+        The function will set one or multiple trace flags on the SQL Server instance(s) listed.
+        These are not persisted after a restart, use Set-DbaStartupParameter to set them to persist after restarts.
 
     .PARAMETER SqlInstance
         The target SQL Server instance or instances.
@@ -44,11 +45,6 @@ function Enable-DbaTraceFlag {
         PS C:\> Enable-DbaTraceFlag -SqlInstance sql2016 -TraceFlag 1117, 1118
 
         Enable multiple trace flags on SQL Server instance sql2016
-
-    .EXAMPLE
-        PS C:\> Disable-DbaTraceFlag -SqlInstance sql2016_1, sql2016_2 -TraceFlag 6532,7314
-
-        Disable more than 1 globally running trace flags on more than 1 SQL Server instances sql2016_1 and sql2016_2
     #>
     [CmdletBinding()]
     param (
@@ -63,9 +59,9 @@ function Enable-DbaTraceFlag {
     process {
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             $CurrentRunningTraceFlags = Get-DbaTraceFlag -SqlInstance $server -EnableException

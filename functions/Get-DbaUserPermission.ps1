@@ -168,24 +168,24 @@ function Get-DbaUserPermission {
                                 dp.[Grantor Type] COLLATE SQL_Latin1_General_CP1_CI_AS ,
                                 dp.[Source View]
                         FROM    tempdb.[STIG].[database_role_members] drm
-                                LEFT JOIN tempdb.[STIG].[database_permissions] dp ON ( drm.Member = dp.Grantee
+                                FULL JOIN tempdb.[STIG].[database_permissions] dp ON ( drm.Member = dp.Grantee
                                                                                       OR drm.Role = dp.Grantee
                                                                                      )
                         WHERE	dp.Grantor IS NOT NULL
+                                AND dp.Grantee NOT IN ('public', 'guest')
                                 AND [Schema/Owner] <> 'sys'"
 
-        if ($IncludePublicGuest) { $dbSQL = $dbSQL.Replace("LEFT JOIN", "FULL JOIN") }
+        if ($IncludePublicGuest) { $dbSQL = $dbSQL.Replace("AND dp.Grantee NOT IN ('public', 'guest')", "") }
         if ($IncludeSystemObjects) { $dbSQL = $dbSQL.Replace("AND [Schema/Owner] <> 'sys'", "") }
 
     }
 
     process {
         foreach ($instance in $SqlInstance) {
-
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 10 -AzureUnsupported
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 10 -AzureUnsupported
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             $dbs = $server.Databases

@@ -26,7 +26,7 @@ function Connect-ConnstringInstance {
         Sets the number of seconds a statement is given to run before failing with a timeout error.
 
     .EXAMPLE
-        Connect-SqlInstance -SqlInstance sql2014
+        Connect-DbaInstance -SqlInstance sql2014
 
         Connect to the Server sql2014 with native credentials.
     #>
@@ -55,7 +55,7 @@ function Connect-ConnstringInstance {
         }
         # Build connection string
         $connstring = New-DbaConnectionString @boundparams -ClientName "dbatools PowerShell module - dbatools.io"
-        $sqlconn = New-Object System.Data.SqlClient.SqlConnection $connstring
+        $sqlconn = New-Object Microsoft.Data.SqlClient.SqlConnection $connstring
         $serverconn = New-Object Microsoft.SqlServer.Management.Common.ServerConnection $sqlconn
         $null = $serverconn.Connect()
         New-Object Microsoft.SqlServer.Management.Smo.Server $serverconn

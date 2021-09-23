@@ -61,15 +61,18 @@ function Get-DbaPbmStore {
     )
 
     process {
+        if ($PSVersionTable.PSEdition -eq "Core") {
+            Stop-Function -Message "This command is not supported on Linux or macOS"
+            return
+        }
         foreach ($instance in $SqlInstance) {
-
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 10
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 10
                 $sqlStoreConnection = New-Object Microsoft.SqlServer.Management.Sdk.Sfc.SqlStoreConnection $server.ConnectionContext.SqlConnectionObject
                 # DMF is the Declarative Management Framework, Policy Based Management's old name
                 $store = New-Object Microsoft.SqlServer.Management.DMF.PolicyStore $sqlStoreConnection
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             Add-Member -Force -InputObject $store -MemberType NoteProperty ComputerName -value $server.ComputerName

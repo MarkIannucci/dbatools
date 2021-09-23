@@ -86,9 +86,9 @@ function Remove-DbaDatabase {
 
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $sqlcredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
             $InputObject += $server.Databases | Where-Object { $_.Name -in $Database }
         }
@@ -103,6 +103,7 @@ function Remove-DbaDatabase {
                 if ($Pscmdlet.ShouldProcess("$db on $server", "KillDatabase")) {
                     $server.KillDatabase($db.name)
                     $server.Refresh()
+                    Remove-TeppCacheItem -SqlInstance $server -Type database -Name $db.name
 
                     [pscustomobject]@{
                         ComputerName = $server.ComputerName

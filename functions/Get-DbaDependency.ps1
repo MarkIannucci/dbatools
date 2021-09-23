@@ -31,9 +31,6 @@ function Get-DbaDependency {
         This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting.
         Using this switch turns this "nice by default" feature off and enables you to catch exceptions with your own try/catch.
 
-    .PARAMETER IncludeScript
-        Setting this switch will cause the function to also retrieve the creation script of the dependency.
-
     .NOTES
         Tags: Database, Dependent, Dependency, Object
         Author: Chrissy LeMaire (@cl), netnerds.net
@@ -63,6 +60,18 @@ function Get-DbaDependency {
 
     begin {
         #region Utility functions
+
+        function Read-Parent {
+            [CmdletBinding()]
+            param (
+                $InputObject
+            )
+            $InputObject.Urn
+            if ($InputObject.Parent -ne $null) {
+                Read-Parent $InputObject.Parent
+            }
+        }
+
         function Get-DependencyTree {
             [CmdletBinding()]
             param (
@@ -123,6 +132,12 @@ function Get-DbaDependency {
             if ($EnumParents) { Add-Member -Force -InputObject $InputObject -Name Tier -Value ($Tier * -1) -MemberType NoteProperty -PassThru }
             else { Add-Member -Force -InputObject $InputObject -Name Tier -Value $Tier -MemberType NoteProperty -PassThru }
 
+            $circularReferenceCheck = Read-Parent -InputObject $Parent
+            if ($Tier -gt 0 -and $circularReferenceCheck.Value -Contains $InputObject.Urn.Value) {
+                Write-Message -Message "Circular Reference detected. $circularReferenceCheck" -Level Warning
+                return # End dependency tree descension here.
+            }
+
             if ($InputObject.HasChildNodes) { Read-DependencyTree -InputObject $InputObject.FirstChild -Tier ($Tier + 1) -Parent $InputObject -EnumParents $EnumParents }
             if ($InputObject.NextSibling) { Read-DependencyTree -InputObject $InputObject.NextSibling -Tier $Tier -Parent $Parent -EnumParents $EnumParents }
         }
@@ -149,6 +164,8 @@ function Get-DbaDependency {
                 $options.WithDependencies = $true
                 $scripter.Options = $options
                 $scripter.Server = $Server
+
+                $eol = [System.Environment]::NewLine
             }
 
             process {
@@ -176,7 +193,7 @@ function Get-DbaDependency {
                     # I can't remember how to remove these options and their syntax is breaking stuff
                     $SQLscript = $SQLscript -replace "SET ANSI_NULLS ON", ""
                     $SQLscript = $SQLscript -replace "SET QUOTED_IDENTIFIER ON", ""
-                    $NewObject.Script = "$SQLscript `r`ngo"
+                    $NewObject.Script = "$SQLscript $($eol)go"
 
                     $NewObject
                 }
@@ -200,7 +217,7 @@ function Get-DbaDependency {
                 }
             }
             end {
-                $list | Group-Object -Property Object | ForEach-Object { $_.Group | Sort-Object -Property Tier -Descending | Select-Object -First 1 } | Sort-Object Tier
+                $list | Group-Object -Property Object, Tier | ForEach-Object { $_.Group | Sort-Object -Property Tier -Descending | Select-Object -First 1 } | Sort-Object Tier
             }
         }
         #endregion Utility functions
@@ -228,7 +245,7 @@ function Get-DbaDependency {
             $limitCount = 2
             if ($IncludeSelf) { $limitCount = 1 }
             if ($tree.Count -lt $limitCount) {
-                Write-Message -Message "No dependencies detected for $($Item)" -Level Host
+                Write-Message -Message "No dependencies detected for $($Item)" -Level Important
                 continue
             }
 

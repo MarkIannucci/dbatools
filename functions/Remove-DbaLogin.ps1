@@ -83,9 +83,9 @@ function Remove-DbaLogin {
 
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $sqlcredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
             $InputObject += $server.Logins | Where-Object { $_.Name -in $Login }
         }
@@ -99,6 +99,8 @@ function Remove-DbaLogin {
                     }
 
                     $currentlogin.Drop()
+
+                    Remove-TeppCacheItem -SqlInstance $server -Type login -Name $currentlogin.name
 
                     [pscustomobject]@{
                         ComputerName = $server.ComputerName

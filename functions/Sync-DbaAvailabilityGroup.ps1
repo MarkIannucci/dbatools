@@ -80,6 +80,9 @@ function Sync-DbaAvailabilityGroup {
     .PARAMETER ExcludeJob
         Specific jobs to exclude when performing the sync. If unspecified, all jobs will be processed.
 
+    .PARAMETER DisableJobOnDestination
+        If this switch is enabled, the newly migrated job will be disabled on the destination server.
+
     .PARAMETER InputObject
         Enables piping from Get-DbaAvailabilityGroup.
 
@@ -145,6 +148,7 @@ function Sync-DbaAvailabilityGroup {
         [string[]]$ExcludeLogin,
         [string[]]$Job,
         [string[]]$ExcludeJob,
+        [switch]$DisableJobOnDestination,
         [parameter(ValueFromPipeline)]
         [Microsoft.SqlServer.Management.Smo.AvailabilityGroup[]]$InputObject,
         [switch]$Force,
@@ -170,9 +174,9 @@ function Sync-DbaAvailabilityGroup {
             $server = $InputObject.Parent
         } else {
             try {
-                $server = Connect-SqlInstance -SqlInstance $Primary -SqlCredential $PrimarySqlCredential
+                $server = Connect-DbaInstance -SqlInstance $Primary -SqlCredential $PrimarySqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $Primary" -Category ConnectionError -ErrorRecord $_ -Target $Primary
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $Primary
                 return
             }
         }
@@ -190,10 +194,9 @@ function Sync-DbaAvailabilityGroup {
             $secondaries = @()
             foreach ($computer in $Secondary) {
                 try {
-                    $secondaries += Connect-SqlInstance -SqlInstance $computer -SqlCredential $SecondarySqlCredential
+                    $secondaries += Connect-DbaInstance -SqlInstance $computer -SqlCredential $SecondarySqlCredential
                 } catch {
-                    Stop-Function -Message "Error occurred while establishing connection to $computer" -Category ConnectionError -ErrorRecord $_ -Target $Primary
-                    return
+                    Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $computer -Continue
                 }
             }
         }
@@ -342,7 +345,7 @@ function Sync-DbaAvailabilityGroup {
             if ($Exclude -notcontains "AgentJob") {
                 if ($PSCmdlet.ShouldProcess("Syncing Agent Jobs from $primaryserver to $secondaryservers")) {
                     Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Syncing Agent Jobs"
-                    Copy-DbaAgentJob -Source $server -Destination $secondaries -Force:$force -Job $Job -ExcludeJob $ExcludeJob
+                    Copy-DbaAgentJob -Source $server -Destination $secondaries -Force:$force -Job $Job -ExcludeJob $ExcludeJob -DisableOnDestination:$DisableJobOnDestination
                 }
             }
 

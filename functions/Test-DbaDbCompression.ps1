@@ -145,8 +145,8 @@ function Test-DbaDbCompression {
         [parameter(Mandatory, ValueFromPipeline)]
         [DbaInstanceParameter[]]$SqlInstance,
         [PSCredential]$SqlCredential,
-        [object[]]$Database,
-        [object[]]$ExcludeDatabase,
+        [string[]]$Database,
+        [string[]]$ExcludeDatabase,
         [string[]]$Schema,
         [string[]]$Table,
         [int]$ResultSize,
@@ -236,13 +236,13 @@ function Test-DbaDbCompression {
 
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 10
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 10
             } catch {
-                Stop-Function -Message "Failed to process Instance $instance" -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             $Server.ConnectionContext.StatementTimeout = 0
-            $sqlVersion = $(Get-DbaBuildReference -SqlInstance $server).Build.Major
+            $sqlVersion = $(Get-DbaBuild -SqlInstance $server).Build.Major
 
             $sqlVersionRestrictions = @()
 

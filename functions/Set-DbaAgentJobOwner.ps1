@@ -4,10 +4,14 @@ function Set-DbaAgentJobOwner {
         Sets SQL Agent job owners with a desired login if jobs do not match that owner.
 
     .DESCRIPTION
-        This function alters SQL Agent Job ownership to match a specified login if their current owner does not match the target login. By default, the target login will be 'sa',
-        but the the user may specify a different login for ownership. This be applied to all jobs or only to a select collection of jobs.
+        This function alters SQL Agent Job ownership to match a specified login if their current owner does not match the target login.
 
-        Best practice reference: http://sqlmag.com/blog/sql-server-tip-assign-ownership-jobs-sysadmin-account
+        By default, the target login will be 'sa',
+        but the the user may specify a different login for ownership.
+
+        This be applied to all local (non MultiServer) jobs or only to a select collection of jobs.
+
+        Best practice reference: https://www.itprotoday.com/sql-server-tip-assign-ownership-jobs-sysadmin-account
 
         If the 'sa' account was renamed, the new name will be used.
 
@@ -98,9 +102,9 @@ function Set-DbaAgentJobOwner {
     process {
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $sqlcredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             #Get job list. If value for -Job is passed, massage to make it a string array.
@@ -110,7 +114,7 @@ function Set-DbaAgentJobOwner {
             if ($Job) {
                 $jobcollection = $server.JobServer.Jobs | Where-Object { $Job -contains $_.Name }
             } else {
-                $jobcollection = $server.JobServer.Jobs
+                $jobcollection = $server.JobServer.Jobs | Where-Object JobType -eq Local
             }
 
             if ($ExcludeJob) {
