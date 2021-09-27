@@ -87,9 +87,9 @@ function Mount-DbaDatabase {
     process {
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $sqlcredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             if (-not $server.Logins.Item($DatabaseOwner)) {
@@ -104,10 +104,6 @@ function Mount-DbaDatabase {
 
                 if ($server.Databases[$db]) {
                     Stop-Function -Message "$db is already attached to $server." -Target $db -Continue
-                }
-
-                if ($server.Databases[$db].IsSystemObject) {
-                    Stop-Function -Message "$db is a system database and cannot be attached using this method." -Target $db -Continue
                 }
 
                 if (-Not (Test-Bound -Parameter FileStructure)) {

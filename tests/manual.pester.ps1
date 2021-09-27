@@ -98,15 +98,27 @@ param (
     $ScriptAnalyzer
 )
 
-$HasScriptAnalyzer = $null -ne (Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue).Version
+$invokeFormatterVersion = (Get-Command Invoke-Formatter -ErrorAction SilentlyContinue).Version
+$HasScriptAnalyzer = $null -ne $invokeFormatterVersion
 $MinimumPesterVersion = [Version] '3.4.5.0' # Because this is when -Show was introduced
 $PesterVersion = (Get-Command Invoke-Pester -ErrorAction SilentlyContinue).Version
 $HasPester = $null -ne $PesterVersion
+$ScriptAnalyzerCorrectVersion = '1.18.2'
 
 if (!($HasScriptAnalyzer)) {
     Write-Warning "Please install PSScriptAnalyzer"
-    Write-Warning "     Install-Module -Name PSScriptAnalyzer"
+    Write-Warning "     Install-Module -Name PSScriptAnalyzer -RequiredVersion '$ScriptAnalyzerCorrectVersion'"
     Write-Warning "     or go to https://github.com/PowerShell/PSScriptAnalyzer"
+} else {
+    if ($invokeFormatterVersion -ne $ScriptAnalyzerCorrectVersion) {
+        Remove-Module PSScriptAnalyzer
+        try {
+            Import-Module PSScriptAnalyzer -RequiredVersion $ScriptAnalyzerCorrectVersion -ErrorAction Stop
+        } catch {
+            Write-Warning "Please install PSScriptAnalyzer $ScriptAnalyzerCorrectVersion"
+            Write-Warning "     Install-Module -Name PSScriptAnalyzer -RequiredVersion '$ScriptAnalyzerCorrectVersion'"
+        }
+    }
 }
 if (!($HasPester)) {
     Write-Warning "Please install Pester"
@@ -119,7 +131,7 @@ if ($PesterVersion -lt $MinimumPesterVersion) {
     Write-Warning "     or go to https://github.com/pester/Pester"
 }
 
-if (($HasPester -and $HasScriptAnalyzer -and ($PesterVersion -ge $MinimumPesterVersion)) -eq $false) {
+if (($HasPester -and $HasScriptAnalyzer -and ($PesterVersion -ge $MinimumPesterVersion) -and ($invokeFormatterVersion -eq $ScriptAnalyzerCorrectVersion)) -eq $false) {
     Write-Warning "Exiting..."
     return
 }
@@ -127,7 +139,7 @@ if (($HasPester -and $HasScriptAnalyzer -and ($PesterVersion -ge $MinimumPesterV
 $ModuleBase = Split-Path -Path $PSScriptRoot -Parent
 
 if (-not(Test-Path "$ModuleBase\.git" -Type Container)) {
-    New-Item -Type Container -Path "$ModuleBase\.git"
+    New-Item -Type Container -Path "$ModuleBase\.git" -Force
 }
 
 #removes previously imported dbatools, if any
@@ -175,7 +187,7 @@ function Get-CoverageIndications($Path, $ModuleBase) {
     $allfiles = Get-ChildItem -File -Path "$ModuleBase\internal\functions", "$ModuleBase\functions" -Filter '*.ps1'
     foreach ($f in $funcs) {
         # exclude always used functions ?!
-        if ($f -in ('Connect-SqlInstance', 'Select-DefaultView', 'Stop-Function', 'Write-Message')) { continue }
+        if ($f -in ('Connect-DbaInstance', 'Select-DefaultView', 'Stop-Function', 'Write-Message')) { continue }
         # can I find a correspondence to a physical file (again, on the convenience of having Get-DbaFoo.ps1 actually defining Get-DbaFoo)?
         $res = $allfiles | Where-Object { $_.Name.Replace('.ps1', '') -eq $f }
         if ($res.count -gt 0) {

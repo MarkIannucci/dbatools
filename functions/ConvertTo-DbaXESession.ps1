@@ -60,7 +60,8 @@ function ConvertTo-DbaXESession {
         [switch]$EnableException
     )
     begin {
-        $rawsql = Get-Content "$script:PSModuleRoot\bin\sp_SQLskills_ConvertTraceToEEs.sql" -Raw
+        $rawpath = [IO.Path]::Combine($script:PSModuleRoot, "bin", "sp_SQLskills_ConvertTraceToEEs.sql")
+        $rawsql = Get-Content $rawpath -Raw
     }
     process {
         foreach ($trace in $InputObject) {
@@ -101,7 +102,7 @@ function ConvertTo-DbaXESession {
                 Stop-Function -Message "Issue creating, dropping or executing sp_SQLskills_ConvertTraceToExtendedEvents in tempdb on $server." -Target $server -ErrorRecord $_
             }
 
-            $results = $results -join "`r`n"
+            $results = $results -join [System.Environment]::NewLine
 
             if ($OutputScriptOnly) {
                 $results

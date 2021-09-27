@@ -19,6 +19,9 @@ function Start-DbaAgentJob {
     .PARAMETER Job
         The job(s) to process - this list is auto-populated from the server. If unspecified, all jobs will be processed.
 
+    .PARAMETER StepName
+        The step name to start the job at, will default to the step configured by the job.
+
     .PARAMETER ExcludeJob
         The job(s) to exclude - this list is auto-populated from the server.
 
@@ -102,6 +105,11 @@ function Start-DbaAgentJob {
         This is a parallel approach to submitting all jobs and waiting for them all to complete.
         Starts Job1, starts Job2, starts Job3 and waits for completion of Job1, Job2, and Job3.
 
+    .EXAMPLE
+        PS C:\> Start-DbaAgentJob -SqlInstance sql2016 -Job JobWith5Steps -StepName Step4
+
+        Starts the JobWith5Steps SQL Agent Job at step Step4.
+
     #>
     [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = "Default")]
     param (
@@ -109,6 +117,7 @@ function Start-DbaAgentJob {
         [DbaInstanceParameter[]]$SqlInstance,
         [PSCredential]$SqlCredential,
         [string[]]$Job,
+        [string]$StepName,
         [string[]]$ExcludeJob,
         [parameter(Mandatory, ValueFromPipeline, ParameterSetName = "Object")]
         [Microsoft.SqlServer.Management.Smo.Agent.Job[]]$InputObject,
@@ -128,8 +137,8 @@ function Start-DbaAgentJob {
             )
             [string]$server = $currentjob.Parent.Parent.Name
             [string]$currentStep = $currentjob.CurrentRunStep
-            [int]$currentStepId = $currentstep.Split('()')[0].Trim()
-            [string]$currentStepName = $currentstep.Split('()')[1]
+            [int]$currentStepId, [string]$currentStepName = $currentstep.Split(' ', 2)
+            $currentStepName = $currentStepName.Substring(1, $currentStepName.Length - 2)
             [string]$currentRunStatus = $currentjob.CurrentRunStatus
             [int]$jobStepsCount = $currentjob.JobSteps.Count
             [int]$currentStepRetryAttempts = $currentjob.CurrentRunRetryAttempt
@@ -153,9 +162,9 @@ function Start-DbaAgentJob {
         # Loop through each of the instances and store agent jobs
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             # Check if all the jobs need to included
@@ -187,7 +196,18 @@ function Start-DbaAgentJob {
                 # Start the job
                 $lastrun = $currentjob.LastRunDate
                 Write-Message -Level Verbose -Message "Last run date was $lastrun"
-                $null = $currentjob.Start()
+                if ($StepName) {
+                    if ($currentjob.JobSteps.Name -contains $StepName) {
+                        Write-Message -Level Verbose -Message "Starting job [$currentjob] at step [$StepName]"
+                        $null = $currentjob.Start($StepName)
+                    } else {
+                        Write-Message -Level Verbose -Message "Job [$currentjob] does not contain step [$StepName]"
+                        continue
+                    }
+                } else {
+                    $null = $currentjob.Start()
+                }
+
 
                 # Wait and refresh so that it has a chance to change status
                 Start-Sleep -Milliseconds $SleepPeriod

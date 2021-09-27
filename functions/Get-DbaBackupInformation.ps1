@@ -39,7 +39,10 @@ function Get-DbaBackupInformation {
         If provided only backup originating from this destination will be returned. This SQL instance will not be connected to or involved in this work
 
     .PARAMETER NoXpDirTree
-        If this switch is set, then Files will be parsed as locally files. This can cause failures if the running user can see files that the parsing SQL Instance cannot
+        If specified, this switch will cause the files to be parsed as local files to the SQL Server Instance provided. Errors may be observed when the SQL Server Instance cannot access the files being parsed.
+
+    .PARAMETER NoXpDirRecurse
+        If specified, this switch changes xp_dirtree behavior to not recurse the folder structure.
 
     .PARAMETER DirectoryRecurse
         If specified the provided path/directory will be traversed (only applies if not using XpDirTree)
@@ -144,6 +147,8 @@ function Get-DbaBackupInformation {
         [parameter(ParameterSetName = "Create")]
         [Switch]$NoXpDirTree,
         [parameter(ParameterSetName = "Create")]
+        [Switch]$NoXpDirRecurse = $false,
+        [parameter(ParameterSetName = "Create")]
         [switch]$DirectoryRecurse,
         [switch]$EnableException,
         [switch]$MaintenanceSolution,
@@ -183,9 +188,9 @@ function Get-DbaBackupInformation {
         }
         if ($PSCmdlet.ParameterSetName -eq "Create") {
             try {
-                $server = Connect-SqlInstance -SqlInstance $SqlInstance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $SqlInstance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $SqlInstance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $SqlInstance
                 return
             }
         }
@@ -231,11 +236,11 @@ function Get-DbaBackupInformation {
                             Write-Message -Level Verbose -Message "Skipping Log Backups as requested"
                         } else {
                             Write-Message -Level Verbose -Message "OLA - Getting folder contents"
-                            $Files += Get-XpDirTreeRestoreFile -Path $f -SqlInstance $server
+                            $Files += Get-XpDirTreeRestoreFile -Path $f -SqlInstance $server -NoRecurse:$NoXpDirRecurse
                         }
                     } else {
                         Write-Message -Message "Testing a folder $f" -Level Verbose
-                        $Files += $Check = Get-XpDirTreeRestoreFile -Path $f -SqlInstance $server
+                        $Files += $Check = Get-XpDirTreeRestoreFile -Path $f -SqlInstance $server -NoRecurse:$NoXpDirRecurse
                         if ($null -eq $check) {
                             Write-Message -Message "Nothing returned from $f" -Level Verbose
                         }
@@ -314,7 +319,10 @@ function Get-DbaBackupInformation {
                 $historyObject.End = [DateTime]$group.Group[0].BackupFinishDate
                 $historyObject.Duration = ([DateTime]$group.Group[0].BackupFinishDate - [DateTime]$group.Group[0].BackupStartDate)
                 $historyObject.Path = [string[]]$group.Group.BackupPath
-                $historyObject.FileList = ($group.Group.FileList | Select-Object Type, LogicalName, PhysicalName -Unique)
+                $historyObject.FileList = ($group.Group.FileList | Select-Object Type, LogicalName, PhysicalName, @{
+                        Name       = "Size"
+                        Expression = { [dbasize]$PSItem.Size }
+                    } -Unique)
                 $historyObject.TotalSize = ($group.Group.BackupSize.Byte | Measure-Object -Sum).Sum
                 $HistoryObject.CompressedBackupSize = ($group.Group.CompressedBackupSize.Byte | Measure-Object -Sum).Sum
                 $historyObject.Type = $description

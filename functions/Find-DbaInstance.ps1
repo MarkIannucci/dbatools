@@ -501,7 +501,7 @@ function Find-DbaInstance {
                         $toDelete = @()
                         foreach ($dataSet in $masterList) {
                             try {
-                                $server = Connect-SqlInstance -SqlInstance $dataSet.FullSmoName -SqlCredential $SqlCredential
+                                $server = Connect-DbaInstance -SqlInstance $dataSet.FullSmoName -SqlCredential $SqlCredential
                                 $dataSet.SqlConnected = $true
                                 $dataSet.Confidence = 'High'
 
@@ -1023,7 +1023,7 @@ function Find-DbaInstance {
                 if ($DiscoveryType -band ([Sqlcollaborative.Dbatools.Discovery.DbaInstanceDiscoveryType]::DataSourceEnumeration)) {
                     try {
                         # Discover instances
-                        foreach ($instance in ([System.Data.Sql.SqlDataSourceEnumerator]::Instance.GetDataSources())) {
+                        foreach ($instance in ([Microsoft.Data.Sql.SqlDataSourceEnumerator]::Instance.GetDataSources())) {
                             if ($instance.InstanceName -ne [System.DBNull]::Value) {
                                 $steppablePipeline.Process("$($instance.Servername)\$($instance.InstanceName)")
                             } else {

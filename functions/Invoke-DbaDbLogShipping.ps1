@@ -521,9 +521,9 @@ function Invoke-DbaDbLogShipping {
 
         # Try connecting to the instance
         try {
-            $SourceServer = Connect-SqlInstance -SqlInstance $SourceSqlInstance -SqlCredential $SourceSqlCredential
+            $sourceServer = Connect-DbaInstance -SqlInstance $SourceSqlInstance -SqlCredential $SourceSqlCredential
         } catch {
-            Stop-Function -Message "Could not connect to Sql Server instance $SourceSqlInstance" -ErrorRecord $_ -Target $SourceSqlInstance
+            Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $SourceSqlInstance
             return
         }
 
@@ -868,10 +868,9 @@ function Invoke-DbaDbLogShipping {
 
             # Try connecting to the instance
             try {
-                $DestinationServer = Connect-SqlInstance -SqlInstance $destInstance -SqlCredential $DestinationSqlCredential
+                $destinationServer = Connect-DbaInstance -SqlInstance $destInstance -SqlCredential $DestinationSqlCredential
             } catch {
-                Stop-Function -Message "Could not connect to Sql Server instance $destInstance" -ErrorRecord $_ -Target $destInstance
-                return
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $destInstance -Continue
             }
 
             $DestinationServerName, $DestinationInstanceName = $destInstance.FullName.Split("\")
@@ -1258,10 +1257,10 @@ function Invoke-DbaDbLogShipping {
                             Write-Message -Message "No path to the full backup is set. Trying to retrieve the last full backup for $db from $SourceSqlInstance" -Level Verbose
 
                             # Get the last full backup
-                            $LastBackup = Get-DbaDbBackupHistory -SqlInstance $SourceSqlInstance -Database $($db.Name) -LastFull -Credential $SourceSqlCredential
+                            $LastBackup = Get-DbaDbBackupHistory -SqlInstance $SourceSqlInstance -Database $($db.Name) -LastFull -SqlCredential $SourceSqlCredential
 
                             # Check if there was a last backup
-                            if ($null -eq $LastBackup) {
+                            if ($null -ne $LastBackup) {
                                 # Test the path to the backup
                                 Write-Message -Message "Testing last backup path $(($LastBackup[-1]).Path[-1])" -Level Verbose
                                 if ((Test-DbaPath -Path ($LastBackup[-1]).Path[-1] -SqlInstance $SourceSqlInstance -SqlCredential $SourceCredential) -ne $true) {

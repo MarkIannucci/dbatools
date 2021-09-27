@@ -3,7 +3,8 @@ function Start-DbccCheck {
     param (
         [object]$server,
         [string]$DbName,
-        [switch]$table
+        [switch]$table,
+        [int]$MaxDop
     )
 
     $servername = $server.name
@@ -18,8 +19,13 @@ function Start-DbccCheck {
                 $null = $server.databases[$DbName].CheckTables('None')
                 Write-Verbose "Dbcc CheckTables finished successfully for $DbName on $servername"
             } else {
-                $null = $server.Query("DBCC CHECKDB ([$DbName])")
-                Write-Verbose "Dbcc CHECKDB finished successfully for $DbName on $servername"
+                if ($MaxDop) {
+                    $null = $server.Query("DBCC CHECKDB ([$DbName]) WITH MAXDOP = $MaxDop")
+                    Write-Verbose "Dbcc CHECKDB finished successfully for $DbName on $servername"
+                } else {
+                    $null = $server.Query("DBCC CHECKDB ([$DbName])")
+                    Write-Verbose "Dbcc CHECKDB finished successfully for $DbName on $servername"
+                }
             }
             return "Success"
         } catch {
@@ -30,7 +36,7 @@ function Start-DbccCheck {
             try {
                 $newmessage = ($message -split "at Microsoft.SqlServer.Management.Common.ConnectionManager.ExecuteTSql")[0]
                 $newmessage = ($newmessage -split "Microsoft.SqlServer.Management.Common.ExecutionFailureException:")[1]
-                $newmessage = ($newmessage -replace "An exception occurred while executing a Transact-SQL statement or batch. ---> System.Data.SqlClient.SqlException:").Trim()
+                $newmessage = ($newmessage -replace "An exception occurred while executing a Transact-SQL statement or batch. ---> Microsoft.Data.SqlClient.SqlException:").Trim()
                 $message = $newmessage
             } catch {
                 $null

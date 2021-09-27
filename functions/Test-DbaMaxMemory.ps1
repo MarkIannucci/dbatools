@@ -64,24 +64,27 @@ function Test-DbaMaxMemory {
 
     process {
         foreach ($instance in $SqlInstance) {
-            Write-Message -Level VeryVerbose -Message "Processing $instance" -Target $instance
-
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             Write-Message -Level Verbose -Target $instance -Message "Retrieving maximum memory statistics from $instance"
             $serverMemory = Get-DbaMaxMemory -SqlInstance $server
             try {
-                Write-Message -Level Verbose -Target $instance -Message "Retrieving number of instances from $($instance.ComputerName)"
-                if ($Credential) {
-                    $serverService = Get-DbaService -ComputerName $instance -Credential $Credential -EnableException
+                if ($isLinux -or $isMacOS) {
+                    Write-Message -Level Warning -Target $instance -Message "Can't determine instance count from Linux or Mac. Defaulting to 1."
+                    $instanceCount = 1
                 } else {
-                    $serverService = Get-DbaService -ComputerName $instance -EnableException
+                    Write-Message -Level Verbose -Target $instance -Message "Retrieving number of instances from $($instance.ComputerName)"
+                    if ($Credential) {
+                        $serverService = Get-DbaService -ComputerName $instance -Credential $Credential -EnableException
+                    } else {
+                        $serverService = Get-DbaService -ComputerName $instance -EnableException
+                    }
+                    $instanceCount = ($serverService | Where-Object State -Like Running | Where-Object InstanceName | Group-Object InstanceName | Measure-Object Count).Count
                 }
-                $instanceCount = ($serverService | Where-Object State -Like Running | Where-Object InstanceName | Group-Object InstanceName | Measure-Object Count).Count
             } catch {
                 Write-Message -Level Warning -Message "Couldn't get accurate SQL Server instance count on $instance. Defaulting to 1." -Target $instance -ErrorRecord $_
                 $instanceCount = 1

@@ -106,7 +106,12 @@ function New-DbaDacProfile {
             $return | Out-String
         }
 
-        function Get-Template ($db, $connString) {
+        function Get-Template {
+            param (
+                $db,
+                $connString
+            )
+
             "<?xml version=""1.0"" ?>
             <Project ToolsVersion=""14.0"" xmlns=""http://schemas.microsoft.com/developer/msbuild/2003"">
               <PropertyGroup>
@@ -115,7 +120,7 @@ function New-DbaDacProfile {
                 <ProfileVersionNumber>1</ProfileVersionNumber>
                 {2}
               </PropertyGroup>
-            </Project>" -f $db[0], $connString, $(Convert-HashtableToXMLString($PublishOptions))
+            </Project>" -f $db, $connString, $(Convert-HashtableToXMLString($PublishOptions))
         }
 
         function Get-ServerName ($connString) {
@@ -137,19 +142,19 @@ function New-DbaDacProfile {
 
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
-            $ConnectionString += $server.ConnectionContext.ConnectionString.Replace(';Application Name="dbatools PowerShell module - dbatools.io"', '')
+            $ConnectionString += $server.ConnectionContext.ConnectionString.Replace(';Application Name="dbatools PowerShell module - dbatools.io"', '').Replace(";Multiple Active Result Sets=False", "").Replace(";Encrypt=False", "").Replace(";Trust Server Certificate=False", "")
 
         }
 
         foreach ($connString in $ConnectionString) {
             foreach ($db in $Database) {
                 if ($Pscmdlet.ShouldProcess($db, "Creating new DAC Profile")) {
-                    $profileTemplate = Get-Template $db, $connString
+                    $profileTemplate = Get-Template -db $db -connString $connString
                     $instanceName = Get-ServerName $connString
 
                     try {

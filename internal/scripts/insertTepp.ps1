@@ -81,4 +81,9 @@ Register-DbaTeppArgumentCompleter -Command "Get-DbaProcess", "Stop-DbaProcess" -
 Register-DbaTeppArgumentCompleter -Command "Get-DbaProcess", "Stop-DbaProcess" -Parameter Spid -Name processSpid
 Register-DbaTeppArgumentCompleter -Command "Import-DbaXESessionTemplate", "Get-DbaXESessionTemplate", "Export-DbaXESessionTemplate" -Parameter Template -Name xesessiontemplate
 Register-DbaTeppArgumentCompleter -Command "Import-DbaPfDataCollectorSetTemplate", "Get-DbaPfDataCollectorSetTemplate", "Export-DbaPfDataCollectorSetTemplate"  -Parameter Template -Name perfmontemplate
+Register-DbaTeppArgumentCompleter -Command "New-DbaAgentSchedule" -Parameter FrequencyInterval -Name newagentschedule
+Register-DbaTeppArgumentCompleter -Command "Set-DbaAgentSchedule" -Parameter FrequencyInterval -Name setagentschedule
+Register-DbaTeppArgumentCompleter -Command "Get-DbaSpConfigure", "Set-DbaSpConfigure" -Parameter Name -Name ConfigName
+Register-DbaTeppArgumentCompleter -Command "Copy-DbaSpConfigure" -Parameter ConfigName -Name ConfigName
+Register-DbaTeppArgumentCompleter -Command "Copy-DbaSpConfigure" -Parameter ExcludeConfigName -Name ConfigName
 #endregion Explicit TEPP

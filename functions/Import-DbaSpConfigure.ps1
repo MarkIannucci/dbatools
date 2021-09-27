@@ -114,27 +114,26 @@ function Import-DbaSpConfigure {
         [switch]$EnableException
     )
     begin {
-
-        if ($Path.length -eq 0) {
+        if (-not $PSBoundParameters.Path -and $PSBoundParameters.Source) {
             try {
-                $sourceserver = Connect-SqlInstance -SqlInstance $Source -SqlCredential $SourceSqlCredential
+                $sourceserver = Connect-DbaInstance -SqlInstance $Source -SqlCredential $SourceSqlCredential
             } catch {
-                Stop-Function -Message "Failed to process Instance $Source" -ErrorRecord $_ -Target $Source
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $Source
                 return
             }
 
-            if (!(Test-SqlSa -SqlInstance $sourceserver -SqlCredential $SourceSqlCredential)) {
+            if (-not (Test-SqlSa -SqlInstance $sourceserver -SqlCredential $SourceSqlCredential)) {
                 Stop-Function -Message "Not a sysadmin on $sourceserver. Quitting." -Category PermissionDenied -ErrorRecord $_ -Target $server -Continue
             }
 
             try {
-                $destserver = Connect-SqlInstance -SqlInstance $Destination -SqlCredential $DestinationSqlCredential
+                $destserver = Connect-DbaInstance -SqlInstance $Destination -SqlCredential $DestinationSqlCredential
             } catch {
-                Stop-Function -Message "Failed to process Instance $Destination" -ErrorRecord $_ -Target $Destination
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $Destination
                 return
             }
 
-            if (!(Test-SqlSa -SqlInstance $destserver -SqlCredential $DestinationSqlCredential)) {
+            if (-not (Test-SqlSa -SqlInstance $destserver -SqlCredential $DestinationSqlCredential)) {
                 Stop-Function -Message "Not a sysadmin on $destserver. Quitting." -Category PermissionDenied -ErrorRecord $_ -Target $server -Continue
             }
 
@@ -142,16 +141,17 @@ function Import-DbaSpConfigure {
             $destination = $destserver.DomainInstanceName
         } else {
             try {
-                $server = Connect-SqlInstance -SqlInstance $SqlInstance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $SqlInstance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Failed to process Instance $SqlInstance" -ErrorRecord $_ -Target $SqlInstance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $SqlInstance
+                return
             }
 
             if (!(Test-SqlSa -SqlInstance $server -SqlCredential $SqlCredential)) {
                 Stop-Function -Message "Not a sysadmin on $server. Quitting." -Category PermissionDenied -ErrorRecord $_ -Target $server -Continue
             }
 
-            if ((Test-Path $Path) -eq $false) {
+            if (-not (Test-Path $Path)) {
                 Stop-Function -Message "File $Path Not Found" -Category InvalidArgument -Target $Path -Continue
             }
         }
@@ -159,7 +159,8 @@ function Import-DbaSpConfigure {
         if ($Force) { $ConfirmPreference = 'none' }
     }
     process {
-        if ($Path.length -eq 0) {
+        if (Test-FunctionInterrupt) { return }
+        if (-not $PSBoundParameters.Path) {
             if ($Pscmdlet.ShouldProcess($destination, "Export sp_configure")) {
                 $sqlfilename = Export-DbaSpConfigure $sourceserver
             }
@@ -231,7 +232,9 @@ function Import-DbaSpConfigure {
         }
     }
     end {
-        if ($Path.length -gt 0) {
+        if (Test-FunctionInterrupt) { return }
+
+        if ($PSBoundParameters.Path) {
             $server.ConnectionContext.Disconnect()
         } else {
             $sourceserver.ConnectionContext.Disconnect()

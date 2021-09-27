@@ -40,7 +40,6 @@ function Test-DbaDbRecoveryModel {
 
         Website: https://dbatools.io
         Copyright: (c) 2018 by dbatools, licensed under MIT
-        License: GNU GPL v3 https://opensource.org/licenses/GPL-3.0
 
     .LINK
         https://dbatools.io/Test-DbaDbRecoveryModel
@@ -120,9 +119,9 @@ function Test-DbaDbRecoveryModel {
     process {
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $sqlcredential -MinimumVersion 9
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 9
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             try {

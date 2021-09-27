@@ -45,10 +45,8 @@ Set-Location $ModuleBase
 # required to calculate coverage
 $global:dbatools_dotsourcemodule = $true
 $dbatools_serialimport = $true
-#removes previously imported dbatools, if any
-Remove-Module dbatools -ErrorAction Ignore
 #imports the psm1 to be able to use internal functions in tests
-Import-Module "$ModuleBase\dbatools.psm1"
+Import-Module "$ModuleBase\dbatools.psm1" -Force
 #imports the module making sure DLL is loaded ok
 Import-Module "$ModuleBase\dbatools.psd1"
 
@@ -98,7 +96,7 @@ function Get-CoverageIndications($Path, $ModuleBase) {
     $allfiles = Get-ChildItem -File -Path "$ModuleBase\internal\functions", "$ModuleBase\functions" -Filter '*.ps1'
     foreach ($f in $funcs) {
         # exclude always used functions ?!
-        if ($f -in ('Connect-SqlInstance', 'Select-DefaultView', 'Stop-Function', 'Write-Message')) { continue }
+        if ($f -in ('Connect-DbaInstance', 'Select-DefaultView', 'Stop-Function', 'Write-Message')) { continue }
         # can I find a correspondence to a physical file (again, on the convenience of having Get-DbaFoo.ps1 actually defining Get-DbaFoo)?
         $res = $allfiles | Where-Object { $_.Name.Replace('.ps1', '') -eq $f }
         if ($res.count -gt 0) {
@@ -214,14 +212,25 @@ if (-not $Finalize) {
         }
         # Pester 4.0 outputs already what file is being ran. If we remove write-host from every test, we can time
         # executions for each test script (i.e. Executing Get-DbaFoo .... Done (40 seconds))
-        Add-AppveyorTest -Name $f.Name -Framework NUnit -FileName $f.FullName -Outcome Running
-        $PesterRun = Invoke-Pester @PesterSplat
-        $PesterRun | Export-Clixml -Path "$ModuleBase\PesterResults$PSVersion$Counter.xml"
-        $outcome = "Passed"
-        if ($PesterRun.FailedCount -gt 0) {
-            $outcome = "Failed"
+        $trialNo = 1
+        while ($trialNo -le 3) {
+            if ($trialNo -eq 1) {
+                $appvTestName = $f.Name
+            } else {
+                $appvTestName = "$f.Name, attempt #$trialNo"
+            }
+            Add-AppveyorTest -Name $appvTestName -Framework NUnit -FileName $f.FullName -Outcome Running
+            $PesterRun = Invoke-Pester @PesterSplat
+            $PesterRun | Export-Clixml -Path "$ModuleBase\PesterResults$PSVersion$Counter.xml"
+            $outcome = "Passed"
+            if ($PesterRun.FailedCount -gt 0) {
+                $trialno += 1
+                Update-AppveyorTest -Name $appvTestName -Framework NUnit -FileName $f.FullName -Outcome "Failed" -Duration $PesterRun.Time.TotalMilliseconds
+            } else {
+                Update-AppveyorTest -Name $appvTestName -Framework NUnit -FileName $f.FullName -Outcome "Passed" -Duration $PesterRun.Time.TotalMilliseconds
+                break
+            }
         }
-        Update-AppveyorTest -Name $f.Name -Framework NUnit -FileName $f.FullName -Outcome $outcome -Duration $PesterRun.Time.TotalMilliseconds
     }
     # Gather support package as an artifact
     # New-DbatoolsSupportPackage -Path $ModuleBase - turns out to be too heavy

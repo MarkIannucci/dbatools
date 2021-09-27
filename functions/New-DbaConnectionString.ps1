@@ -37,7 +37,7 @@ function New-DbaConnectionString {
         By default, this is "GO"
 
     .PARAMETER ClientName
-        By default, this command sets the client to "dbatools PowerShell module - dbatools.io - custom connection" if you're doing anything that requires profiling, you can look for this client name. Using -ClientName allows you to set your own custom client.
+        By default, this command sets the client's ApplicationName property to "dbatools PowerShell module - dbatools.io". If you're doing anything that requires profiling, you can look for this client name. Using -ClientName allows you to set your own custom client application name.
 
     .PARAMETER Database
         Database name
@@ -110,6 +110,9 @@ function New-DbaConnectionString {
 
     .PARAMETER WorkstationId
         Sets the name of the workstation connecting to SQL Server.
+
+    .PARAMETER Legacy
+        Use this switch to create a connection string using System.Data.SqlClient instead of Microsoft.Data.SqlClient.
 
     .PARAMETER WhatIf
         If this switch is enabled, no actions are performed but informational messages will be displayed that explain what would happen if the command were to run.
@@ -209,11 +212,176 @@ function New-DbaConnectionString {
         [int]$StatementTimeout,
         [switch]$TrustServerCertificate,
         [string]$WorkstationId,
+        [switch]$Legacy,
         [string]$AppendConnectionString
     )
-
+    begin {
+        function Test-Azure {
+            Param (
+                [DbaInstanceParameter[]]$SqlInstance
+            )
+            if ($SqlInstance.ComputerName -match $AzureDomain) {
+                Write-Message -Level Debug -Message "Test for Azure is positive"
+                return $true
+            } else {
+                Write-Message -Level Debug -Message "Test for Azure is negative"
+                return $false
+            }
+        }
+    }
     process {
         foreach ($instance in $SqlInstance) {
+
+            <#
+            The new code path (formerly known as experimental) is now the default.
+            To have a quick way to switch back in case any problems occur, the switch "legacy" is introduced: Set-DbatoolsConfig -FullName sql.connection.legacy -Value $true
+            All the sub paths inside the following if clause will end with a continue, so the normal code path is not used.
+            #>
+            if (-not (Get-DbatoolsConfigValue -FullName sql.connection.legacy)) {
+                <#
+                Maybe more docs...
+                #>
+                Write-Message -Level Debug -Message "We have to build a connect string, using these parameters: $($PSBoundParameters.Keys)"
+
+                # Test for unsupported parameters
+                if (Test-Bound -ParameterName 'LockTimeout') {
+                    Write-Message -Level Warning -Message "Parameter LockTimeout not supported, because it is not part of a connection string."
+                }
+                # TODO: That can be added to the Data Source - but why?
+                #if (Test-Bound -ParameterName 'NetworkProtocol') {
+                #    Write-Message -Level Warning -Message "Parameter NetworkProtocol not supported, because it is not part of a connection string."
+                #}
+                if (Test-Bound -ParameterName 'StatementTimeout') {
+                    Write-Message -Level Warning -Message "Parameter StatementTimeout not supported, because it is not part of a connection string."
+                }
+                if (Test-Bound -ParameterName 'SqlExecutionModes') {
+                    Write-Message -Level Warning -Message "Parameter SqlExecutionModes not supported, because it is not part of a connection string."
+                }
+
+                # Set defaults like in Connect-DbaInstance
+                if (Test-Bound -Not -ParameterName 'Database') {
+                    $Database = (Get-DbatoolsConfigValue -FullName 'sql.connection.database')
+                }
+                if (Test-Bound -Not -ParameterName 'ClientName') {
+                    $ClientName = (Get-DbatoolsConfigValue -FullName 'sql.connection.clientname')
+                }
+                if (Test-Bound -Not -ParameterName 'ConnectTimeout') {
+                    $ConnectTimeout = ([Sqlcollaborative.Dbatools.Connection.ConnectionHost]::SqlConnectionTimeout)
+                }
+                if (Test-Bound -Not -ParameterName 'EncryptConnection') {
+                    $EncryptConnection = (Get-DbatoolsConfigValue -FullName 'sql.connection.encrypt')
+                }
+                if (Test-Bound -Not -ParameterName 'NetworkProtocol') {
+                    $np = (Get-DbatoolsConfigValue -FullName 'sql.connection.protocol')
+                    if ($np) {
+                        $NetworkProtocol = $np
+                    }
+                }
+                if (Test-Bound -Not -ParameterName 'PacketSize') {
+                    $PacketSize = (Get-DbatoolsConfigValue -FullName 'sql.connection.packetsize')
+                }
+                if (Test-Bound -Not -ParameterName 'TrustServerCertificate') {
+                    $TrustServerCertificate = (Get-DbatoolsConfigValue -FullName 'sql.connection.trustcert')
+                }
+                # TODO: Maybe put this in a config item:
+                $AzureDomain = "database.windows.net"
+
+                # Rename credential parameter to align with other commands, later rename parameter
+                $SqlCredential = $Credential
+
+                if ($Pscmdlet.ShouldProcess($instance, "Making a new Connection String")) {
+                    if ($instance.Type -like "Server") {
+                        Write-Message -Level Debug -Message "server object passed in, connection string is: $($instance.InputObject.ConnectionContext.ConnectionString)"
+                        if ($Legacy) {
+                            $converted = $instance.InputObject.ConnectionContext.ConnectionString | Convert-ConnectionString
+                            $connStringBuilder = New-Object -TypeName System.Data.SqlClient.SqlConnectionStringBuilder -ArgumentList $converted
+                        } else {
+                            $connStringBuilder = New-Object -TypeName Microsoft.Data.SqlClient.SqlConnectionStringBuilder -ArgumentList $instance.InputObject.ConnectionContext.ConnectionString
+                        }
+                        # In Azure, check for a database change
+                        if ((Test-Azure -SqlInstance $instance) -and $Database) {
+                            $connStringBuilder['Initial Catalog'] = $Database
+                        }
+                        $connstring = $connStringBuilder.ConnectionString
+                        # TODO: Should we check the other parameters and change the connection string accordingly?
+                    } else {
+                        if ($Legacy) {
+                            $connStringBuilder = New-Object -TypeName System.Data.SqlClient.SqlConnectionStringBuilder
+                        } else {
+                            $connStringBuilder = New-Object -TypeName Microsoft.Data.SqlClient.SqlConnectionStringBuilder
+                        }
+                        $connStringBuilder['Data Source'] = $instance.FullSmoName
+                        if ($ApplicationIntent) { $connStringBuilder['ApplicationIntent'] = $ApplicationIntent }
+                        if ($ClientName) { $connStringBuilder['Application Name'] = $ClientName }
+                        if ($ConnectTimeout) { $connStringBuilder['Connect Timeout'] = $ConnectTimeout }
+                        if ($Database) { $connStringBuilder['Initial Catalog'] = $Database }
+                        if ($EncryptConnection) { $connStringBuilder['Encrypt'] = $true } else { $connStringBuilder['Encrypt'] = $false }
+                        if ($FailoverPartner) { $connStringBuilder['Failover Partner'] = $FailoverPartner }
+                        if ($MaxPoolSize) { $connStringBuilder['Max Pool Size'] = $MaxPoolSize }
+                        if ($MinPoolSize) { $connStringBuilder['Min Pool Size'] = $MinPoolSize }
+                        if ($MultipleActiveResultSets) { $connStringBuilder['MultipleActiveResultSets'] = $true } else { $connStringBuilder['MultipleActiveResultSets'] = $false }
+                        if ($MultiSubnetFailover) { $connStringBuilder['MultiSubnetFailover'] = $true }
+                        if ($NonPooledConnection) { $connStringBuilder['Pooling'] = $false }
+                        if ($PacketSize) { $connStringBuilder['Packet Size'] = $PacketSize }
+                        if ($PooledConnectionLifetime) { $connStringBuilder['Load Balance Timeout'] = $PooledConnectionLifetime }
+                        if ($TrustServerCertificate) { $connStringBuilder['TrustServerCertificate'] = $true } else { $connStringBuilder['TrustServerCertificate'] = $false }
+                        if ($WorkstationId) { $connStringBuilder['Workstation Id'] = $WorkstationId }
+                        if ($SqlCredential) {
+                            Write-Message -Level Debug -Message "We have a SqlCredential"
+                            $username = ($SqlCredential.UserName).TrimStart("\")
+                            # support both ad\username and username@ad
+                            if ($username -like "*\*") {
+                                $domain, $login = $username.Split("\")
+                                $username = "$login@$domain"
+                            }
+                            $connStringBuilder['User ID'] = $username
+                            $connStringBuilder['Password'] = $SqlCredential.GetNetworkCredential().Password
+                            if ((Test-Azure -SqlInstance $instance) -and ($username -like "*@*")) {
+                                Write-Message -Level Debug -Message "We connect to Azure with Azure AD account, so adding Authentication=Active Directory Password"
+                                $connStringBuilder['Authentication'] = 'Active Directory Password'
+                            }
+                        } else {
+                            Write-Message -Level Debug -Message "We don't have a SqlCredential"
+                            if (Test-Azure -SqlInstance $instance) {
+                                Write-Message -Level Debug -Message "We connect to Azure, so adding Authentication=Active Directory Integrated"
+                                $connStringBuilder['Authentication'] = 'Active Directory Integrated'
+                            } else {
+                                Write-Message -Level Debug -Message "We don't connect to Azure, so setting Integrated Security=True"
+                                $connStringBuilder['Integrated Security'] = $true
+                            }
+                        }
+
+                        # special config for Azure
+                        if (Test-Azure -SqlInstance $instance) {
+                            if (Test-Bound -Not -ParameterName ConnectTimeout) {
+                                $connStringBuilder['Connect Timeout'] = 30
+                            }
+                            $connStringBuilder['Encrypt'] = $true
+                            # Why adding tcp:?
+                            #$connStringBuilder['Data Source'] = "tcp:$($instance.ComputerName),$($instance.Port)"
+                        }
+                        if ($Legacy) {
+                            $connstring = $connStringBuilder.ConnectionString
+                        } else {
+                            $connstring = $connStringBuilder.ToString()
+                        }
+                        if ($AppendConnectionString) {
+                            # TODO: Check if new connection string is still valid
+                            $connstring = "$connstring;$AppendConnectionString"
+                        }
+                    }
+                    $connstring
+                    continue
+                }
+            }
+            <#
+            This is the end of the new default code path.
+            All session with the configuration "sql.connection.legacy" set to $true will run through the following code.
+            To use the legacy code path: Set-DbatoolsConfig -FullName sql.connection.legacy -Value $true
+            #>
+
+            Write-Message -Level Debug -Message "sql.connection.legacy is used"
+
             if ($Pscmdlet.ShouldProcess($instance, "Making a new Connection String")) {
                 if ($instance.ComputerName -match "database\.windows\.net" -or $instance.InputObject.ComputerName -match "database\.windows\.net") {
                     if ($instance.InputObject.GetType() -eq [Microsoft.SqlServer.Management.Smo.Server]) {

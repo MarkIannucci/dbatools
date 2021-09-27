@@ -100,12 +100,14 @@ function New-DbaDbAsymmetricKey {
     )
     begin {
         if (((Test-Bound 'KeySource') -xor (Test-Bound 'KeySourceType'))) {
-            write-message -level verbose -message 'keysource paramter check'
-            Stop-Function -Message 'Both Keysource and KeySourceType must be provided' -Continue
-            break
+            Write-Message -Level Verbose -Message 'keysource paramter check'
+            Stop-Function -Message 'Both Keysource and KeySourceType must be provided'
+            return
         }
     }
     process {
+        if (Test-FunctionInterrupt) { return }
+
         if ($SqlInstance) {
             $InputObject += Get-DbaDatabase -SqlInstance $SqlInstance -SqlCredential $SqlCredential -Database $Database
         }
@@ -158,7 +160,7 @@ function New-DbaDbAsymmetricKey {
                                 }
                             }
                             if ($SecurePassword) {
-                                $smokey.Create($KeySource, [Microsoft.SqlServer.Management.Smo.AsymmetricKeySourceType]::$KeySourceType, ([System.Runtime.InteropServices.marshal]::PtrToStringAuto([System.Runtime.InteropServices.marshal]::SecureStringToBSTR($SecurePassword))))
+                                $smokey.Create($KeySource, [Microsoft.SqlServer.Management.Smo.AsymmetricKeySourceType]::$KeySourceType, ($SecurePassword | ConvertFrom-SecurePass))
                             } else {
                                 $smokey.Create($Keysource, [Microsoft.SqlServer.Management.Smo.AsymmetricKeySourceType]::$KeySourceType)
                             }
@@ -166,7 +168,7 @@ function New-DbaDbAsymmetricKey {
                         } else {
                             Write-Message -Level Verbose -Message 'Creating normal key without source'
                             if ($SecurePassword) {
-                                $smokey.Create([Microsoft.SqlServer.Management.Smo.AsymmetricKeyEncryptionAlgorithm]::$Algorithm, ([System.Runtime.InteropServices.marshal]::PtrToStringAuto([System.Runtime.InteropServices.marshal]::SecureStringToBSTR($SecurePassword))))
+                                $smokey.Create([Microsoft.SqlServer.Management.Smo.AsymmetricKeyEncryptionAlgorithm]::$Algorithm, ($SecurePassword | ConvertFrom-SecurePass))
                             } else {
                                 $smokey.Create([Microsoft.SqlServer.Management.Smo.AsymmetricKeyEncryptionAlgorithm]::$Algorithm)
                             }
