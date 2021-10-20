@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+  <metadata>
+    <id>dbatools</id>
+    <version>1.0.116</version>
+    <authors>the dbatools team</authors>
+    <owners>dbatools.io</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <licenseUrl>https://opensource.org/licenses/MIT</licenseUrl>
+    <projectUrl>https://dbatools.io/</projectUrl>
+    <iconUrl>https://dbatools.io/logo.png</iconUrl>
+    <description>The community module that enables SQL Server Pros to automate database development and server administration</description>
+    <releaseNotes>https://dbatools.io/changelog</releaseNotes>
+    <copyright>Copyright (c) 2019 by dbatools, licensed under MIT</copyright>
+    <tags>sqlserver migrations sql dba databases mac linux core PSModule</tags>
+  </metadata>
+</package>
