@@ -76,18 +76,19 @@ function Set-DbaAgentJobCategory {
 
         # Check if multiple categories are being changed
         if ($Category.Count -gt 1 -and $NewName.Count -eq 1) {
-            Stop-Function -Message "You cannot rename multiple jobs to the same name" -Target $instance
+            Stop-Function -Message "You cannot rename multiple jobs to the same name"
+            return
         }
     }
 
     process {
+        if (Test-FunctionInterrupt) { return }
 
         foreach ($instance in $SqlInstance) {
-            # Try connecting to the instance
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             # Loop through each of the categories

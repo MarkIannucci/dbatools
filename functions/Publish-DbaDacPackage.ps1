@@ -1,10 +1,10 @@
 function Publish-DbaDacPackage {
     <#
     .SYNOPSIS
-        The Publish-DbaDacPackage command takes a dacpac and publishes it to a database.
+        The Publish-DbaDacPackage command takes a dacpac or bacpac and publishes it to a database.
 
     .DESCRIPTION
-        Publishes the dacpac taken from SSDT project or Export-DbaDacPackage. Changing the schema to match the dacpac and also to run any scripts in the dacpac (pre/post deploy scripts).
+        Publishes the dacpac taken from SSDT project or Export-DbaDacPackage. Changing the schema to match the dacpac and also to run any scripts in the dacpac (pre/post deploy scripts) or bacpac.
 
     .PARAMETER SqlInstance
         The target SQL Server instance or instances.
@@ -26,9 +26,6 @@ function Publish-DbaDacPackage {
     .PARAMETER ConnectionString
         Specifies the connection string to the database you are upgrading. This is not required if SqlInstance is specified.
 
-    .PARAMETER GenerateDeploymentScript
-        If this switch is enabled, the publish script will be generated.
-
     .PARAMETER GenerateDeploymentReport
         If this switch is enabled, the publish XML report  will be generated.
 
@@ -42,7 +39,7 @@ function Publish-DbaDacPackage {
         Specifies the filesystem path (directory) where output files will be generated.
 
     .PARAMETER ScriptOnly
-        If this switch is enabled, only the change scripts will be generated.
+        If this switch is enabled the publish script will be generated.
 
     .PARAMETER IncludeSqlCmdVars
         If this switch is enabled, SqlCmdVars in publish.xml will have their values overwritten.
@@ -62,7 +59,7 @@ function Publish-DbaDacPackage {
         Path to the dac dll. If this is omitted, then the version of dac dll which is packaged with dbatools is used.
 
     .NOTES
-        Tags: Migration, Database, Dacpac
+        Tags: Migration, Database, Dacpac, Bacpac
         Author: Richie lee (@richiebzzzt)
 
         Website: https://dbatools.io
@@ -100,7 +97,7 @@ function Publish-DbaDacPackage {
         Publishes the dacpac using a specific dacfx library. Prompts for confirmation.
 
     .EXAMPLE
-        PS C:\> Publish-DbaDacPackage -SqlInstance sql2017 -Database WideWorldImporters -Path C:\temp\sql2016-WideWorldImporters.dacpac -PublishXml C:\temp\sql2016-WideWorldImporters-publish.xml -GenerateDeploymentScript -ScriptOnly
+        PS C:\> Publish-DbaDacPackage -SqlInstance sql2017 -Database WideWorldImporters -Path C:\temp\sql2016-WideWorldImporters.dacpac -PublishXml C:\temp\sql2016-WideWorldImporters-publish.xml -ScriptOnly
 
         Does not deploy the changes, but will generate the deployment script that would be executed against WideWorldImporters.
     #>
@@ -110,19 +107,16 @@ function Publish-DbaDacPackage {
         [PSCredential]$SqlCredential,
         [Parameter(Mandatory, ValueFromPipelineByPropertyName)]
         [string]$Path,
-        [Parameter(Mandatory, ParameterSetName = 'Xml')]
+        [Parameter(ParameterSetName = 'Xml')]
         [string]$PublishXml,
         [Parameter(Mandatory, ValueFromPipelineByPropertyName)]
         [string[]]$Database,
         [string[]]$ConnectionString,
-        [parameter(ParameterSetName = 'Xml')]
-        [switch]$GenerateDeploymentScript,
-        [parameter(ParameterSetName = 'Xml')]
         [switch]$GenerateDeploymentReport,
         [Switch]$ScriptOnly,
         [ValidateSet('Dacpac', 'Bacpac')]
         [string]$Type = 'Dacpac',
-        [string]$OutputPath = "$home\Documents",
+        [string]$OutputPath = (Get-DbatoolsConfigValue -FullName 'Path.DbatoolsExport'),
         [switch]$IncludeSqlCmdVars,
         [Parameter(ParameterSetName = 'Obj')]
         [Alias("Option")]
@@ -136,23 +130,21 @@ function Publish-DbaDacPackage {
             Stop-Function -Message "You must specify either SqlInstance or ConnectionString."
             return
         }
+        if ($ConnectionString) {
+            $ConnectionString = $ConnectionString | Convert-ConnectionString
+        }
         if ($Type -eq 'Dacpac') {
-            if ((Test-Bound -ParameterName GenerateDeploymentScript) -or (Test-Bound -ParameterName GenerateDeploymentReport)) {
+            if ((Test-Bound -ParameterName ScriptOnly) -or (Test-Bound -ParameterName GenerateDeploymentReport)) {
                 $defaultColumns = 'ComputerName', 'InstanceName', 'SqlInstance', 'Database', 'Dacpac', 'PublishXml', 'Result', 'DatabaseScriptPath', 'MasterDbScriptPath', 'DeploymentReport', 'DeployOptions', 'SqlCmdVariableValues'
             } else {
                 $defaultColumns = 'ComputerName', 'InstanceName', 'SqlInstance', 'Database', 'Dacpac', 'PublishXml', 'Result', 'DeployOptions', 'SqlCmdVariableValues'
             }
         } elseif ($Type -eq 'Bacpac') {
-            if ($ScriptOnly -or $GenerateDeploymentReport -or $GenerateDeploymentScript) {
-                Stop-Function -Message "ScriptOnly, GenerateDeploymentScript, and GenerateDeploymentReport cannot be used in a Bacpac scenario." -ErrorRecord $_
+            if ($ScriptOnly -or $GenerateDeploymentReport) {
+                Stop-Function -Message "ScriptOnly and GenerateDeploymentReport cannot be used in a Bacpac scenario." -ErrorRecord $_
                 return
             }
             $defaultColumns = 'ComputerName', 'InstanceName', 'SqlInstance', 'Database', 'Bacpac', 'Result', 'DeployOptions'
-        }
-
-        if ((Test-Bound -ParameterName ScriptOnly) -and (Test-Bound -Not -ParameterName GenerateDeploymentScript) -and (Test-Bound -Not -ParameterName GenerateDeploymentScript)) {
-            Stop-Function -Message "You must at least one of GenerateDeploymentScript or GenerateDeploymentReport when using ScriptOnly"
-            return
         }
 
         function Get-ServerName ($connString) {
@@ -182,19 +174,6 @@ function Publish-DbaDacPackage {
                 }
             }
         }
-
-        #Check Option object types - should have a specific type
-        if ($Type -eq 'Dacpac') {
-            if ($DacOption -and $DacOption -isnot [Microsoft.SqlServer.Dac.PublishOptions]) {
-                Stop-Function -Message "Microsoft.SqlServer.Dac.PublishOptions object type is expected - got $($DacOption.GetType())."
-                return
-            }
-        } elseif ($Type -eq 'Bacpac') {
-            if ($DacOption -and $DacOption -isnot [Microsoft.SqlServer.Dac.DacImportOptions]) {
-                Stop-Function -Message "Microsoft.SqlServer.Dac.DacImportOptions object type is expected - got $($DacOption.GetType())."
-                return
-            }
-        }
     }
 
     process {
@@ -207,7 +186,25 @@ function Publish-DbaDacPackage {
             return
         }
 
-        if ($PsCmdlet.ParameterSetName -eq 'Xml') {
+        # auto detect if a .bacpac was passed in, just in case the -Type param was not specified
+        if (-not (Test-Bound Type) -and [IO.Path]::GetExtension($Path) -eq '.bacpac') {
+            $Type = 'Bacpac'
+        }
+
+        #Check Option object types - should have a specific type
+        if ($Type -eq 'Dacpac') {
+            if ($DacOption -and $DacOption -isnot [Microsoft.SqlServer.Dac.PublishOptions]) {
+                Stop-Function -Message "Microsoft.SqlServer.Dac.PublishOptions object type is expected for `"-Type Dacpac`" but $($DacOption.GetType()) was passed in."
+                return
+            }
+        } elseif ($Type -eq 'Bacpac') {
+            if ($DacOption -and $DacOption -isnot [Microsoft.SqlServer.Dac.DacImportOptions]) {
+                Stop-Function -Message "Microsoft.SqlServer.Dac.DacImportOptions object type is expected for `"-Type Bacpac`" but $($DacOption.GetType()) was passed in."
+                return
+            }
+        }
+
+        if (Test-Bound PublishXml) {
             if (-not (Test-Path -Path $PublishXml)) {
                 Stop-Function -Message "$PublishXml not found."
                 return
@@ -216,11 +213,11 @@ function Publish-DbaDacPackage {
 
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Failure." -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
-            $ConnectionString += $server.ConnectionContext.ConnectionString.Replace('"', "'")
+            $ConnectionString += $server.ConnectionContext.ConnectionString.Replace('"', "'") | Convert-ConnectionString
         }
 
         #Use proper class to load the object
@@ -240,7 +237,7 @@ function Publish-DbaDacPackage {
             }
         }
         #Load XML profile when used
-        if ($PsCmdlet.ParameterSetName -eq 'Xml') {
+        if (Test-Bound PublishXml) {
             try {
                 $options = New-DbaDacOption -Type $Type -Action Publish -PublishXml $PublishXml -EnableException
             } catch {
@@ -249,8 +246,8 @@ function Publish-DbaDacPackage {
             }
         }
         #Create/re-use deployment options object
-        elseif ($PsCmdlet.ParameterSetName -eq 'Obj') {
-            if (!$DacOption) {
+        else {
+            if (-not (Test-Bound DacOption)) {
                 $options = New-DbaDacOption -Type $Type -Action Publish
             } else {
                 $options = $DacOption
@@ -262,20 +259,24 @@ function Publish-DbaDacPackage {
         }
 
         foreach ($connString in $ConnectionString) {
+            $connString = $connString | Convert-ConnectionString
             $cleaninstance = Get-ServerName $connString
             $instance = $cleaninstance.ToString().Replace('--', '\')
 
+            # Fix for #7704 to take care that $cleaninstance can be used as a filename:
+            $cleaninstance = $cleaninstance.Replace(':', '_')
+
             foreach ($dbName in $Database) {
                 #Set deployment properties when specified
-                if (Test-Bound -ParameterName GenerateDeploymentScript) {
-                    $options.GenerateDeploymentScript = $GenerateDeploymentScript
+                if (Test-Bound -ParameterName ScriptOnly) {
+                    $options.GenerateDeploymentScript = $true
                 }
                 if (Test-Bound -ParameterName GenerateDeploymentReport) {
                     $options.GenerateDeploymentReport = $GenerateDeploymentReport
                 }
                 #Set output file paths when needed
                 $timeStamp = (Get-Date).ToString("yyMMdd_HHmmss_f")
-                if ($GenerateDeploymentScript) {
+                if ($options.GenerateDeploymentScript) {
                     $options.DatabaseScriptPath = Join-Path $OutputPath "$cleaninstance-$dbName`_DeployScript_$timeStamp.sql"
                     $options.MasterDbScriptPath = Join-Path $OutputPath "$cleaninstance-$dbName`_Master.DeployScript_$timeStamp.sql"
                 }
@@ -296,10 +297,8 @@ function Publish-DbaDacPackage {
                     }
                     #Perform proper action depending on the Type
                     if ($Type -eq 'Dacpac') {
-                        if ($ScriptOnly) {
-                            if (!$options.GenerateDeploymentScript) {
-                                Stop-Function -Message "GenerateDeploymentScript option should be specified when running with -ScriptOnly" -EnableException $true
-                            }
+                        if ($options.GenerateDeploymentScript) {
+                            Write-Message -Level Verbose -Message "Generating the deployment script as requested by the caller."
                             if (!$options.DatabaseScriptPath) {
                                 Stop-Function -Message "DatabaseScriptPath option should be specified when running with -ScriptOnly" -EnableException $true
                             }
@@ -332,10 +331,14 @@ function Publish-DbaDacPackage {
                                 Write-Message -Level Verbose -Message "Master database change script - $($result.MasterDbScript)."
                             }
                         }
-                        $resultOutput = ($output.output -join "`r`n" | Out-String).Trim()
+                        $resultOutput = ($output.output -join [System.Environment]::NewLine | Out-String).Trim()
                         if ($resultOutput -match "Failed" -and ($options.GenerateDeploymentReport -or $options.GenerateDeploymentScript)) {
                             Write-Message -Level Warning -Message "Seems like the attempt to publish/script may have failed. If scripts have not generated load dacpac into Visual Studio to check SQL is valid."
                         }
+
+                        # Fix for #7704 to take care that named pipe connections to the local host work:
+                        $instance = $instance.Replace('NP:.', '.')
+
                         $server = [dbainstance]$instance
                         if ($Type -eq 'Dacpac') {
                             $output = [pscustomobject]@{

@@ -4,7 +4,8 @@ function Disable-DbaTraceFlag {
         Disable a Global Trace Flag that is currently running
 
     .DESCRIPTION
-        The function will disable a Trace Flag that is currently running globally on the SQL Server instance(s) listed
+        The function will disable a Trace Flag that is currently running globally on the SQL Server instance(s) listed.
+        These are not persisted after a restart, use Set-DbaStartupParameter to set them to persist after restarts.
 
     .PARAMETER SqlInstance
         The target SQL Server instance or instances.
@@ -55,9 +56,9 @@ function Disable-DbaTraceFlag {
         foreach ($instance in $SqlInstance) {
 
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             $current = Get-DbaTraceFlag -SqlInstance $server -EnableException

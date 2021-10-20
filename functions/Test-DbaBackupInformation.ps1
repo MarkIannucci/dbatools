@@ -84,19 +84,23 @@ function Test-DbaBackupInformation {
 
     begin {
         try {
-            $RestoreInstance = Connect-SqlInstance -SqlInstance $SqlInstance -SqlCredential $SqlCredential
+            $RestoreInstance = Connect-DbaInstance -SqlInstance $SqlInstance -SqlCredential $SqlCredential
         } catch {
-            Stop-Function -Message "Error occurred while establishing connection to $SqlInstance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+            Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $SqlInstance
             return
         }
         $InternalHistory = @()
     }
     process {
+        if (Test-FunctionInterrupt) { return }
+
         foreach ($bh in $BackupHistory) {
             $InternalHistory += $bh
         }
     }
     end {
+        if (Test-FunctionInterrupt) { return }
+
         $RegisteredFileCheck = Get-DbaDbPhysicalFile -SqlInstance $RestoreInstance
 
         $Databases = $InternalHistory.Database | Select-Object -Unique

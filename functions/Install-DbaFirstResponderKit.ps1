@@ -33,6 +33,12 @@ function Install-DbaFirstResponderKit {
         Specifies the path to a local file to install FRK from. This *should* be the zip file as distributed by the maintainers.
         If this parameter is not specified, the latest version will be downloaded and installed from https://github.com/BrentOzarULTD/SQL-Server-First-Responder-Kit
 
+    .PARAMETER OnlyScript
+        Specifies the name(s) of the script(s) to run for installation. Wildcards are permitted.
+        This way only part of the First Responder Kit can be installed.
+        Using one of the three official Install-* scripts (Install-All-Scripts.sql, Install-Core-Blitz-No-Query-Store.sql, Install-Core-Blitz-With-Query-Store.sql) is possible this way.
+        Even removing the First Responder Kit is possible by using the official Uninstall.sql.
+
     .PARAMETER Force
         If this switch is enabled, the FRK will be downloaded from the internet even if previously cached.
 
@@ -90,6 +96,21 @@ function Install-DbaFirstResponderKit {
         PS C:\> Install-DbaFirstResponderKit -SqlInstance sql2016 -Branch dev
 
         Installs the dev branch version of the FRK in the master database on sql2016 instance.
+
+    .EXAMPLE
+        PS C:\> Install-DbaFirstResponderKit -SqlInstance sql2016 -OnlyScript sp_Blitz.sql, sp_BlitzWho.sql, SqlServerVersions.sql
+
+        Installs only the procedures sp_Blitz and sp_BlitzWho and the table SqlServerVersions by running the corresponding scripts.
+
+    .EXAMPLE
+        PS C:\> Install-DbaFirstResponderKit -SqlInstance sql2016 -OnlyScript Install-Core-Blitz-No-Query-Store.sql
+
+        Installs only part of the First Responder Kit by running the official install script.
+
+    .EXAMPLE
+        PS C:\> Install-DbaFirstResponderKit -SqlInstance sql2016 -OnlyScript Uninstall.sql
+
+        Uninstalls the First Responder Kit by running the official uninstall script.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = "Medium")]
     param (
@@ -100,88 +121,44 @@ function Install-DbaFirstResponderKit {
         [string]$Branch = "main",
         [object]$Database = "master",
         [string]$LocalFile,
+        [ValidateSet('Install-All-Scripts.sql', 'Install-Core-Blitz-No-Query-Store.sql', 'Install-Core-Blitz-With-Query-Store.sql',
+            'sp_Blitz.sql', 'sp_BlitzFirst.sql', 'sp_BlitzIndex.sql', 'sp_BlitzCache.sql', 'sp_BlitzWho.sql', 'sp_BlitzQueryStore.sql',
+            'sp_BlitzAnalysis.sql', 'sp_BlitzBackups.sql', 'sp_BlitzInMemoryOLTP.sql', 'sp_BlitzLock.sql',
+            'sp_AllNightLog.sql', 'sp_AllNightLog_Setup.sql', 'sp_DatabaseRestore.sql', 'sp_ineachdb.sql',
+            'SqlServerVersions.sql', 'Uninstall.sql')]
+        [string[]]$OnlyScript,
         [switch]$Force,
         [switch]$EnableException
     )
     begin {
         if ($Force) { $ConfirmPreference = 'none' }
 
-        $DbatoolsData = Get-DbatoolsConfigValue -FullName "Path.DbatoolsData"
-
-        if (-not $DbatoolsData) {
-            $DbatoolsData = [System.IO.Path]::GetTempPath()
+        # Do we need a new local cached version of the software?
+        $dbatoolsData = Get-DbatoolsConfigValue -FullName 'Path.DbatoolsData'
+        $localCachedCopy = Join-DbaPath -Path $dbatoolsData -Child "SQL-Server-First-Responder-Kit-$Branch"
+        if ($Force -or $LocalFile -or -not (Test-Path -Path $localCachedCopy)) {
+            if ($PSCmdlet.ShouldProcess('FirstResponderKit', 'Update local cached copy of the software')) {
+                try {
+                    Save-DbaCommunitySoftware -Software FirstResponderKit -Branch $Branch -LocalFile $LocalFile -EnableException
+                } catch {
+                    Stop-Function -Message 'Failed to update local cached copy' -ErrorRecord $_
+                }
+            }
         }
 
-        $url = "https://github.com/BrentOzarULTD/SQL-Server-First-Responder-Kit/archive/$Branch.zip"
-        $temp = [System.IO.Path]::GetTempPath()
-        $zipFile = Join-Path -Path $temp -ChildPath "SQL-Server-First-Responder-Kit-$Branch.zip"
-        $zipFolder = Join-Path -Path $temp -ChildPath "SQL-Server-First-Responder-Kit-$Branch"
-        $LocalCachedCopy = Join-Path -Path $DbatoolsData -ChildPath "SQL-Server-First-Responder-Kit-$Branch"
-
-        if ($Force -or -not(Test-Path -Path $LocalCachedCopy -PathType Container) -or $LocalFile) {
-            # Force was passed, or we don't have a local copy, or $LocalFile was passed
-            if (Test-Path $zipFile) {
-                if ($PSCmdlet.ShouldProcess($zipFile, "File found, dropping $zipFile")) {
-                    Remove-Item -Path $zipFile -ErrorAction SilentlyContinue
-                }
-            }
-
-            if ($LocalFile) {
-                if (-not (Test-Path $LocalFile)) {
-                    if ($PSCmdlet.ShouldProcess($LocalFile, "File does not exists, returning to prompt")) {
-                        Stop-Function -Message "$LocalFile doesn't exist"
-                        return
-                    }
-                }
-                if (Test-Path $LocalFile -PathType Container) {
-                    if ($PSCmdlet.ShouldProcess($LocalFile, "File is not a zip file, returning to prompt")) {
-                        Stop-Function -Message "$LocalFile should be a zip file"
-                        return
-                    }
-                }
-                if (Test-Windows -NoWarn) {
-                    if ($PSCmdlet.ShouldProcess($LocalFile, "Checking if Windows system, unblocking file")) {
-                        Unblock-File $LocalFile -ErrorAction SilentlyContinue
-                    }
-                }
-                if ($PSCmdlet.ShouldProcess($LocalFile, "Extracting archive to $temp path")) {
-                    Expand-Archive -Path $LocalFile -DestinationPath $temp -Force
-                }
-            } else {
-                Write-Message -Level Verbose -Message "Downloading and unzipping the First Responder Kit zip file."
-                if ($PSCmdlet.ShouldProcess($url, "Downloading zip file")) {
-                    try {
-                        try {
-                            Invoke-TlsWebRequest $url -OutFile $zipFile -ErrorAction Stop -UseBasicParsing
-                        } catch {
-                            # Try with default proxy and usersettings
-                            (New-Object System.Net.WebClient).Proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
-                            Invoke-TlsWebRequest $url -OutFile $zipFile -ErrorAction Stop -UseBasicParsing
-                        }
-
-                        # Unblock if there's a block
-                        if (Test-Windows -NoWarn) {
-                            Unblock-File $zipFile -ErrorAction SilentlyContinue
-                        }
-
-                        Expand-Archive -Path $zipFile -DestinationPath $temp -Force
-                        Remove-Item -Path $zipFile
-                    } catch {
-                        Stop-Function -Message "Couldn't download the First Responder Kit. Download and install manually from https://github.com/BrentOzarULTD/SQL-Server-First-Responder-Kit/archive/$Branch.zip." -ErrorRecord $_
-                        return
-                    }
-                }
-            }
-
-            ## Copy it into local area
-            if ($PSCmdlet.ShouldProcess("LocalCachedCopy", "Copying extracted files to the local module cache")) {
-                if (Test-Path -Path $LocalCachedCopy -PathType Container) {
-                    Remove-Item -Path (Join-Path $LocalCachedCopy '*') -Recurse -ErrorAction SilentlyContinue
+        if ($OnlyScript) {
+            $sqlScripts = @()
+            foreach ($script in $OnlyScript) {
+                $sqlScript = Get-ChildItem $LocalCachedCopy -Filter $script
+                if ($sqlScript) {
+                    $sqlScripts += $sqlScript
                 } else {
-                    $null = New-Item -Path $LocalCachedCopy -ItemType Container
+                    Write-Message -Level Warning -Message "Script $script not found in $LocalCachedCopy, skipping."
                 }
-                Copy-Item -Path "$zipFolder\sp_*.sql" -Destination $LocalCachedCopy
             }
+        } else {
+            $sqlScripts = Get-ChildItem $LocalCachedCopy -Filter "sp_*.sql"
+            $sqlScripts += Get-ChildItem $LocalCachedCopy -Filter "SqlServerVersions.sql"
         }
     }
 
@@ -191,7 +168,7 @@ function Install-DbaFirstResponderKit {
         foreach ($instance in $SqlInstance) {
             if ($PSCmdlet.ShouldProcess($instance, "Connecting to $instance")) {
                 try {
-                    $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                    $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential -NonPooledConnection
                 } catch {
                     Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
                 }
@@ -202,7 +179,6 @@ function Install-DbaFirstResponderKit {
                 $allprocedures = ($server.Query($allprocedures_query, $Database)).Name
 
                 # Install/Update each FRK stored procedure
-                $sqlScripts = Get-ChildItem $LocalCachedCopy -Filter "sp_*.sql"
                 foreach ($script in $sqlScripts) {
                     $scriptName = $script.Name
                     $scriptError = $false

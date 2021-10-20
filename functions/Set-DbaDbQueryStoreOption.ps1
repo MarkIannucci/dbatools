@@ -140,7 +140,7 @@ function Set-DbaDbQueryStoreOption {
         [switch]$EnableException
     )
     begin {
-        $ExcludeDatabase += 'master', 'tempdb'
+        $ExcludeDatabase += 'master', 'tempdb', "model"
     }
 
     process {
@@ -156,9 +156,9 @@ function Set-DbaDbQueryStoreOption {
 
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 13
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential -MinimumVersion 13
             } catch {
-                Stop-Function -Message "Can't connect to $instance. Moving on." -Category InvalidOperation -InnerErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             if ($CaptureMode -contains "Custom" -and $server.VersionMajor -lt 15) {

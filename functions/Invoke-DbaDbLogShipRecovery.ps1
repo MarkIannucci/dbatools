@@ -69,12 +69,12 @@ function Invoke-DbaDbLogShipRecovery {
         https://dbatools.io/Invoke-DbaDbLogShipRecovery
 
     .EXAMPLE
-        PS C:\> Invoke-DbaDbLogShipRecovery -SqlInstance server1
+        PS C:\> Invoke-DbaDbLogShipRecovery -SqlInstance server1 -Force
 
         Recovers all the databases on the instance that are enabled for log shipping
 
     .EXAMPLE
-        PS C:\> Invoke-DbaDbLogShipRecovery -SqlInstance server1 -SqlCredential $cred -Verbose
+        PS C:\> Invoke-DbaDbLogShipRecovery -SqlInstance server1 -SqlCredential $cred -Verbose -Force
 
         Recovers all the databases on the instance that are enabled for log shipping using a credential
 
@@ -89,7 +89,7 @@ function Invoke-DbaDbLogShipRecovery {
         Recovers the database db1, db2, db3, db4 to a normal status
 
     .EXAMPLE
-        PS C:\> Invoke-DbaDbLogShipRecovery -SqlInstance server1 -WhatIf
+        PS C:\> Invoke-DbaDbLogShipRecovery -SqlInstance server1 -Force -WhatIf
 
         Shows what would happen if the command were executed.
 
@@ -184,7 +184,7 @@ function Invoke-DbaDbLogShipRecovery {
 
                             Write-ProgressHelper -Activity $activity -StepNumber ($stepCounter++) -Message "Starting copy job"
                             try {
-                                $null = Start-DbaAgentJob -SqlInstance $instance -SqlCredential $sqlcredential -Job $ls.copyjob
+                                $null = Start-DbaAgentJob -SqlInstance $instance -SqlCredential $SqlCredential -Job $ls.copyjob
                             } catch {
                                 $recoverResult = "Failed"
                                 $comment = "Something went wrong starting the copy job $($ls.copyjob)"
@@ -197,14 +197,14 @@ function Invoke-DbaDbLogShipRecovery {
                                 Write-Message -Message "Waiting for the copy action to complete.." -Level Verbose
 
                                 # Get the job status
-                                $jobStatus = Get-DbaAgentJob -SqlInstance $instance -SqlCredential $sqlcredential -Job $ls.copyjob
+                                $jobStatus = Get-DbaAgentJob -SqlInstance $instance -SqlCredential $SqlCredential -Job $ls.copyjob
 
                                 while ($jobStatus.CurrentRunStatus -ne 'Idle') {
                                     # Sleep for while to let the files be copied
                                     Start-Sleep -Seconds $Delay
 
                                     # Get the job status
-                                    $jobStatus = Get-DbaAgentJob -SqlInstance $instance -SqlCredential $sqlcredential -Job $ls.copyjob
+                                    $jobStatus = Get-DbaAgentJob -SqlInstance $instance -SqlCredential $SqlCredential -Job $ls.copyjob
                                 }
 
                                 # Check the lat outcome of the job
@@ -227,7 +227,7 @@ function Invoke-DbaDbLogShipRecovery {
                             if ($PSCmdlet.ShouldProcess($server.name, "Disabling copy job $($ls.copyjob)")) {
                                 try {
                                     Write-Message -Message "Disabling copy job $($ls.copyjob)" -Level Verbose
-                                    $null = Set-DbaAgentJob -SqlInstance $instance -SqlCredential $sqlcredential -Job $ls.copyjob -Disabled
+                                    $null = Set-DbaAgentJob -SqlInstance $instance -SqlCredential $SqlCredential -Job $ls.copyjob -Disabled
                                 } catch {
                                     $recoverResult = "Failed"
                                     $comment = "Something went wrong disabling the copy job."
@@ -243,7 +243,7 @@ function Invoke-DbaDbLogShipRecovery {
                             if ($PSCmdlet.ShouldProcess($server.name, ("Starting restore job " + $ls.restorejob))) {
                                 Write-Message -Message "Starting restore job $($ls.restorejob)" -Level Verbose
                                 try {
-                                    $null = Start-DbaAgentJob -SqlInstance $instance -SqlCredential $sqlcredential -Job $ls.restorejob
+                                    $null = Start-DbaAgentJob -SqlInstance $instance -SqlCredential $SqlCredential -Job $ls.restorejob
                                 } catch {
                                     $comment = "Something went wrong starting the restore job."
                                     Stop-Function -Message "Something went wrong starting the restore job.`n$($_)" -ErrorRecord $_ -Target $server.name
@@ -252,14 +252,14 @@ function Invoke-DbaDbLogShipRecovery {
                                 Write-Message -Message "Waiting for the restore action to complete.." -Level Verbose
 
                                 # Get the job status
-                                $jobStatus = Get-DbaAgentJob -SqlInstance $instance -SqlCredential $sqlcredential -Job $ls.restorejob
+                                $jobStatus = Get-DbaAgentJob -SqlInstance $instance -SqlCredential $SqlCredential -Job $ls.restorejob
 
                                 while ($jobStatus.CurrentRunStatus -ne 'Idle') {
                                     # Sleep for while to let the files be copied
                                     Start-Sleep -Seconds $Delay
 
                                     # Get the job status
-                                    $jobStatus = Get-DbaAgentJob -SqlInstance $instance -SqlCredential $sqlcredential -Job $ls.restorejob
+                                    $jobStatus = Get-DbaAgentJob -SqlInstance $instance -SqlCredential $SqlCredential -Job $ls.restorejob
                                 }
 
                                 # Check the lat outcome of the job
@@ -278,7 +278,7 @@ function Invoke-DbaDbLogShipRecovery {
                             if ($PSCmdlet.ShouldProcess($server.name, "Disabling restore job $($ls.restorejob)")) {
                                 try {
                                     Write-Message -Message ("Disabling restore job " + $ls.restorejob) -Level Verbose
-                                    $null = Set-DbaAgentJob -SqlInstance $instance -SqlCredential $sqlcredential -Job $ls.restorejob -Disabled
+                                    $null = Set-DbaAgentJob -SqlInstance $instance -SqlCredential $SqlCredential -Job $ls.restorejob -Disabled
                                 } catch {
                                     $recoverResult = "Failed"
                                     $comment = "Something went wrong disabling the restore job."

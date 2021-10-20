@@ -36,6 +36,11 @@ function Update-DbaServiceAccount {
         NETWORKSERVICE
         LOCALSYSTEM
 
+    .PARAMETER NoRestart
+        Do not immediately restart the service after changing the password.
+
+        **Note that the changes will not go into effect until you restart the SQL Services**
+
     .PARAMETER WhatIf
         Shows what would happen if the command were to run. No actions are actually performed.
 
@@ -62,7 +67,7 @@ function Update-DbaServiceAccount {
 
     .EXAMPLE
         PS C:\> $SecurePassword = ConvertTo-SecureString 'Qwerty1234' -AsPlainText -Force
-        Update-DbaServiceAccount -ComputerName sql1 -ServiceName 'MSSQL$MYINSTANCE' -SecurePassword $SecurePassword
+        PS C:\> Update-DbaServiceAccount -ComputerName sql1 -ServiceName 'MSSQL$MYINSTANCE' -SecurePassword $SecurePassword
 
         Changes the current service account's password of the service MSSQL$MYINSTANCE to 'Qwerty1234'
 
@@ -81,6 +86,14 @@ function Update-DbaServiceAccount {
         PS C:\> Get-DbaService sql1 -Type Engine -Instance MSSQLSERVER | Update-DbaServiceAccount -Username 'MyDomain\sqluser1'
 
         Configures SQL Server engine service on the machine sql1 to run under MyDomain\sqluser1. Will request user to input the account password.
+
+
+    .EXAMPLE
+        PS C:\> Get-DbaService sql1 -Type Engine -Instance MSSQLSERVER | Update-DbaServiceAccount -Username 'MyDomain\sqluser1' -NoRestart
+
+        Configures SQL Server engine service on the machine sql1 to run under MyDomain\sqluser1. Will request user to input the account password.
+
+        Will not restart, which means the changes will not go into effect, so you will still have to restart during your planned outage window.
 
     #>
     [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = "ServiceName" )]
@@ -101,6 +114,7 @@ function Update-DbaServiceAccount {
         [securestring]$PreviousPassword = (New-Object System.Security.SecureString),
         [Alias("Password", "NewPassword")]
         [securestring]$SecurePassword = (New-Object System.Security.SecureString),
+        [switch]$NoRestart,
         [switch]$EnableException
     )
     begin {
@@ -151,13 +165,15 @@ function Update-DbaServiceAccount {
         }
     }
     process {
+        if (Test-FunctionInterrupt) { return }
+
         if ($PsCmdlet.ParameterSetName -match 'ServiceName') {
             foreach ($Computer in $ComputerName.ComputerName) {
                 $Server = Resolve-DbaNetworkName -ComputerName $Computer -Credential $credential
-                if ($Server.ComputerName) {
+                if ($Server.FullComputerName) {
                     foreach ($service in $ServiceName) {
                         $svcCollection += [psobject]@{
-                            ComputerName = $server.ComputerName
+                            ComputerName = $server.FullComputerName
                             ServiceName  = $service
                         }
                     }
@@ -171,13 +187,13 @@ function Update-DbaServiceAccount {
                     Stop-Function -Message "PowerBIReportServer service is not supported, skipping." -Continue
                 } else {
                     $Server = Resolve-DbaNetworkName -ComputerName $service.ComputerName -Credential $credential
-                    if ($Server.ComputerName) {
+                    if ($Server.FullComputerName) {
                         $svcCollection += [psobject]@{
-                            ComputerName = $Server.ComputerName
+                            ComputerName = $Server.FullComputerName
                             ServiceName  = $service.ServiceName
                         }
                     } else {
-                        Stop-Function -EnableException $EnableException -Message "Failed to connect to $($service.ComputerName)" -Continue
+                        Stop-Function -EnableException $EnableException -Message "Failed to connect to $($service.FullComputerName)" -Continue
                     }
                 }
             }
@@ -217,13 +233,13 @@ function Update-DbaServiceAccount {
                     } catch {
                         $outStatus = 'Failed'
                         $outMessage = $_.Exception.Message
-                        Write-Message -Level Warning -Message $_.Exception.Message -EnableException $EnableException.ToBool()
+                        Stop-Function -Message $outMessage -Continue
                     }
                 } else {
                     $outStatus = 'Successful'
                     $outMessage = 'No changes made - running in -WhatIf mode.'
                 }
-                if ($serviceObject.ServiceType -eq 'Engine' -and $actionType -eq 'Account' -and $outStatus -eq 'Successful' -and $agent.State -eq 'Running') {
+                if ($serviceObject.ServiceType -eq 'Engine' -and $actionType -eq 'Account' -and $outStatus -eq 'Successful' -and $agent.State -eq 'Running' -and -not $NoRestart) {
                     #Restart SQL Agent after SQL Engine has been restarted
                     if ($PsCmdlet.ShouldProcess($serviceObject, "Starting SQL Agent after Engine account change on $($svc.ComputerName)")) {
                         $res = Start-DbaService -ComputerName $svc.ComputerName -Type Agent -InstanceName $serviceObject.InstanceName
@@ -231,6 +247,9 @@ function Update-DbaServiceAccount {
                             Write-Message -Level Warning -Message "Failed to restart SQL Agent after changing credentials. $($res.Message)"
                         }
                     }
+                }
+                if ($NoRestart) {
+                    Write-Message -Level Warning -Message "Changes will not go into effect until you restart. Please restart the services manually during your designated outage window."
                 }
                 $serviceObject = Get-DbaService -ComputerName $svc.ComputerName -ServiceName $svc.ServiceName -Credential $Credential -EnableException:$EnableException
                 Add-Member -Force -InputObject $serviceObject -NotePropertyName Message -NotePropertyValue $outMessage

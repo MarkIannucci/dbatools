@@ -17,6 +17,7 @@ Describe "$CommandName Unit Tests" -Tag 'UnitTests' {
         }
         Mock -CommandName Set-DbaPrivilege -ModuleName dbatools -MockWith { }
         Mock -CommandName Set-DbaTcpPort -ModuleName dbatools -MockWith { }
+        Mock -CommandName Restart-DbaService -ModuleName dbatools -MockWith { }
         Mock -CommandName Get-DbaCmObject -ModuleName dbatools -MockWith { [pscustomobject]@{NumberOfCores = 24 } } -ParameterFilter { $ClassName -eq 'Win32_processor' }
         # mock searching for setup, proper file should always it find
         Mock -CommandName Find-SqlInstanceSetup -MockWith {
@@ -85,6 +86,7 @@ Describe "$CommandName Unit Tests" -Tag 'UnitTests' {
                 "[$mainNode]"
                 'SQLSVCACCOUNT="foo\bar"'
                 'FEATURES="SQLEngine,AS"'
+                'ACTION="Install"'
             ) | Set-Content -Path TestDrive:\Configuration.ini -Force
             It "Should install SQL$version with all features enabled" {
                 $result = Install-DbaInstance -Version $version -Path TestDrive: -EnableException -Confirm:$false -Feature All

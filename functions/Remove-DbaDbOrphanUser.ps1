@@ -107,14 +107,15 @@ function Remove-DbaDbOrphanUser {
     )
     begin {
         if ($Force) { $ConfirmPreference = 'none' }
+
+        $eol = [System.Environment]::NewLine
     }
     process {
         foreach ($Instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $Instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $Instance -SqlCredential $SqlCredential
             } catch {
-                Write-Message -Level Warning -Message "Can't connect to $Instance or access denied. Skipping."
-                continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             $DatabaseCollection = $server.Databases | Where-Object IsAccessible
@@ -148,19 +149,13 @@ function Remove-DbaDbOrphanUser {
                         if ($StackSource -eq "Repair-DbaDbOrphanUser") {
                             Write-Message -Level Verbose -Message "Call origin: Repair-DbaDbOrphanUser."
                             #Will use collection from parameter ($User)
+                            $users = $User
                         } else {
                             Write-Message -Level Verbose -Message "Validating users on database $db."
 
-                            $users = @()
-                            if ($User.Count -eq 0) {
-                                #the third validation will remove from list sql users without login  or mapped to certificate. The rule here is Sid with length higher than 16
-                                $users += $db.Users | Where-Object { $_.Login -eq "" -and ($_.ID -gt 4) -and (($_.Sid.Length -gt 16 -and $_.LoginType -in @([Microsoft.SqlServer.Management.Smo.LoginType]::SqlLogin, [Microsoft.SqlServer.Management.Smo.LoginType]::Certificate)) -eq $false) }
-                                $users += $db.Users | Where-Object { ($_.Name -notin $server.Logins.Name) -and ($_.ID -gt 4) -and ($_.Sid.Length -gt 16 -and $_.LoginType -in @([Microsoft.SqlServer.Management.Smo.LoginType]::WindowsUser, [Microsoft.SqlServer.Management.Smo.LoginType]::WindowsGroup)) }
-                            } else {
-                                Write-Message -Level Verbose -Message "Validating users on database $db."
-                                #the fourth validation will remove from list sql users without login or mapped to certificate. The rule here is Sid with length higher than 16
-                                $users += $db.Users | Where-Object { $_.Login -eq "" -and ($_.ID -gt 4) -and ($User -contains $_.Name) -and (($_.Sid.Length -gt 16 -and $_.LoginType -in @([Microsoft.SqlServer.Management.Smo.LoginType]::SqlLogin, [Microsoft.SqlServer.Management.Smo.LoginType]::Certificate)) -eq $false) }
-                                $users += $db.Users | Where-Object { ($_.Name -notin $server.Logins.Name) -and ($_.ID -gt 4) -and ($User -contains $_.Name) -and ($_.Sid.Length -gt 16 -and $_.LoginType -in @([Microsoft.SqlServer.Management.Smo.LoginType]::WindowsUser, [Microsoft.SqlServer.Management.Smo.LoginType]::WindowsGroup)) }
+                            $users = (Get-DbaDbOrphanUser -SqlInstance $server -Database $db.Name).SmoUser
+                            if ($User.Count -gt 0) {
+                                $users = $users | Where-Object { $User -contains $_.Name }
                             }
                         }
 
@@ -213,7 +208,7 @@ function Remove-DbaDbOrphanUser {
                                                     Write-Message -Level Verbose -Message "Parameter -Force was used! The schema '$($sch.Name)' have $NumberObjects underlying objects. We will change schema owner to 'dbo' and drop the user."
 
                                                     if ($Pscmdlet.ShouldProcess($db.Name, "Changing schema '$($sch.Name)' owner to 'dbo'. -Force used.")) {
-                                                        $AlterSchemaOwner += "ALTER AUTHORIZATION ON SCHEMA::[$($sch.Name)] TO [dbo]`r`n"
+                                                        $AlterSchemaOwner += "ALTER AUTHORIZATION ON SCHEMA::[$($sch.Name)] TO [dbo]$eol"
 
                                                         [pscustomobject]@{
                                                             ComputerName      = $server.ComputerName
@@ -253,7 +248,7 @@ function Remove-DbaDbOrphanUser {
                                                     Write-Message -Level Warning -Message "Schema '$($sch.Name)' does not have any underlying object. Ownership will be changed to 'dbo' so the user can be dropped. Remember to re-check permissions on this schema."
 
                                                     if ($Pscmdlet.ShouldProcess($db.Name, "Changing schema '$($sch.Name)' owner to 'dbo'.")) {
-                                                        $AlterSchemaOwner += "ALTER AUTHORIZATION ON SCHEMA::[$($sch.Name)] TO [dbo]`r`n"
+                                                        $AlterSchemaOwner += "ALTER AUTHORIZATION ON SCHEMA::[$($sch.Name)] TO [dbo]$eol"
 
                                                         [pscustomobject]@{
                                                             ComputerName      = $server.ComputerName
@@ -274,7 +269,13 @@ function Remove-DbaDbOrphanUser {
                                         Write-Message -Level Verbose -Message "User $dbuser does not own any schema. Will be dropped."
                                     }
 
-                                    $query = "$AlterSchemaOwner `r`n$DropSchema `r`nDROP USER " + $dbuser
+                                    # https://github.com/sqlcollaborative/dbatools/issues/7130
+                                    $dbUserName = $dbuser.ToString()
+                                    if (-not ($dbUserName.StartsWith("[") -and $dbUserName.EndsWith("]"))) {
+                                        $dbUserName = "[" + $dbUserName + "]"
+                                    }
+
+                                    $query = "$AlterSchemaOwner $eol$DropSchema $($eol)DROP USER " + $dbUserName
 
                                     Write-Message -Level Debug -Message $query
                                 } else {

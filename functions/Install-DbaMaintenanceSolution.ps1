@@ -53,6 +53,9 @@ function Install-DbaMaintenanceSolution {
     .PARAMETER Confirm
         If this switch is enabled, you will be prompted for confirmation before executing any operations that change state.
 
+    .PARAMETER InstallParallel
+        If this switch is enabled, the Queue and QueueDatabase tables are created, for use when  @DatabasesInParallel = 'Y' are set in the jobs.
+
     .PARAMETER EnableException
         By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message.
         This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting.
@@ -121,6 +124,12 @@ function Install-DbaMaintenanceSolution {
         - 'CommandLog Cleanup'
         - 'DatabaseIntegrityCheck - USER_DATABASES'
         - 'DatabaseBackup - USER_DATABASES - DIFF'
+
+    .EXAMPLE
+        PS C:\> Install-DbaMaintenanceSolution -SqlInstance RES14224 -Database DBA -InstallParallel
+
+        This will create the Queue and QueueDatabase tables for uses when manually changing jobs to use the @DatabasesInParallel = 'Y' flag
+
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = "Medium")]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseSingularNouns", "", Justification = "Internal functions are ignored")]
@@ -139,7 +148,9 @@ function Install-DbaMaintenanceSolution {
         [switch]$InstallJobs,
         [string]$LocalFile,
         [switch]$Force,
+        [switch]$InstallParallel,
         [switch]$EnableException
+
     )
     begin {
         if ($Force) { $ConfirmPreference = 'none' }
@@ -162,70 +173,17 @@ function Install-DbaMaintenanceSolution {
             Write-ProgressHelper -ExcludePercent -Message "If Ola Hallengren's scripts are found, we will drop and recreate them"
         }
 
-        $DbatoolsData = Get-DbatoolsConfigValue -FullName "Path.DbatoolsData"
-
-        $url = "https://github.com/olahallengren/sql-server-maintenance-solution/archive/master.zip"
-
-        $temp = ([System.IO.Path]::GetTempPath()).TrimEnd("\")
-        $zipfile = "$temp\ola-sql-server-maintenance-solution.zip"
-        $zipfolder = "$temp\ola-sql-server-maintenance-solution\"
-        $OLALocation = "OLA_SQL_MAINT_master"
-        $LocalCachedCopy = Join-Path -Path $DbatoolsData -ChildPath $OLALocation
-        if ($LocalFile) {
-            if (-not (Test-Path $LocalFile)) {
-                Stop-Function -Message "$LocalFile doesn't exist"
-                return
-            }
-            if (-not ($LocalFile.EndsWith('.zip'))) {
-                Stop-Function -Message "$LocalFile should be a zip file"
-                return
-            }
-        }
-
-        if ($Force -or -not (Test-Path -Path $LocalCachedCopy -PathType Container) -or $LocalFile) {
-            # Force was passed, or we don't have a local copy, or $LocalFile was passed
-            if ($zipfile | Test-Path) {
-                Remove-Item -Path $zipfile -ErrorAction SilentlyContinue
-            }
-            if ($zipfolder | Test-Path) {
-                Remove-Item -Path $zipfolder -Recurse -ErrorAction SilentlyContinue
-            }
-
-            $null = New-Item -ItemType Directory -Path $zipfolder -ErrorAction SilentlyContinue
-            if ($LocalFile) {
-                Unblock-File $LocalFile -ErrorAction SilentlyContinue
-                Expand-Archive -Path $LocalFile -DestinationPath $zipfolder -Force
-            } else {
-                Write-ProgressHelper -ExcludePercent -Message "Downloading and unzipping Ola's maintenance solution zip file."
-
+        # Do we need a new local cached version of the software?
+        $dbatoolsData = Get-DbatoolsConfigValue -FullName 'Path.DbatoolsData'
+        $localCachedCopy = Join-DbaPath -Path $dbatoolsData -Child 'sql-server-maintenance-solution-master'
+        if ($Force -or $LocalFile -or -not (Test-Path -Path $localCachedCopy)) {
+            if ($PSCmdlet.ShouldProcess('MaintenanceSolution', 'Update local cached copy of the software')) {
                 try {
-                    try {
-                        Invoke-TlsWebRequest $url -OutFile $zipfile -ErrorAction Stop -UseBasicParsing
-                    } catch {
-                        # Try with default proxy and usersettings
-                        (New-Object System.Net.WebClient).Proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
-                        Invoke-TlsWebRequest $url -OutFile $zipfile -ErrorAction Stop -UseBasicParsing
-                    }
-
-                    # Unblock if there's a block
-                    Unblock-File $zipfile -ErrorAction SilentlyContinue
-
-                    Expand-Archive -Path $zipfile -DestinationPath $zipfolder -Force
-
-                    Remove-Item -Path $zipfile
+                    Save-DbaCommunitySoftware -Software MaintenanceSolution -LocalFile $LocalFile -EnableException
                 } catch {
-                    Stop-Function -Message "Couldn't download Ola's maintenance solution. Download and install manually from https://github.com/olahallengren/sql-server-maintenance-solution/archive/master.zip." -ErrorRecord $_
-                    return
+                    Stop-Function -Message 'Failed to update local cached copy' -ErrorRecord $_
                 }
             }
-
-            ## Copy it into local area
-            if (Test-Path -Path $LocalCachedCopy -PathType Container) {
-                Remove-Item -Path (Join-Path $LocalCachedCopy '*') -Recurse -ErrorAction SilentlyContinue
-            } else {
-                $null = New-Item -Path $LocalCachedCopy -ItemType Container
-            }
-            Copy-Item -Path $zipfolder -Destination $LocalCachedCopy -Recurse
         }
 
         function Get-DbaOlaWithParameters($listOfFiles) {
@@ -289,18 +247,23 @@ function Install-DbaMaintenanceSolution {
 
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential -NonPooled
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential -NonPooledConnection
             } catch {
                 Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
+            $db = $server.Databases[$Database]
+            if ($null -eq $db) {
+                Stop-Function -Message "Database $Database not found on $instance. Skipping." -Target $instance -Continue
+            }
+
             if ((Test-Bound -ParameterName ReplaceExisting -Not)) {
                 $procs = Get-DbaModule -SqlInstance $server -Database $Database | Where-Object Name -in 'CommandExecute', 'DatabaseBackup', 'DatabaseIntegrityCheck', 'IndexOptimize'
-                $table = Get-DbaDbTable -SqlInstance $server -Database $Database -Table CommandLog -IncludeSystemDBs | Where-Object Database -eq $Database
+                $tables = Get-DbaDbTable -SqlInstance $server -Database $Database -Table CommandLog, Queue, QueueDatabase -IncludeSystemDBs | Where-Object Database -eq $Database
 
-                if ($null -ne $procs -or $null -ne $table) {
+                if ($null -ne $procs -or $null -ne $tables) {
                     Stop-Function -Message "The Maintenance Solution already exists in $Database on $instance. Use -ReplaceExisting to automatically drop and recreate."
-                    return
+                    continue
                 }
             }
 
@@ -309,13 +272,11 @@ function Install-DbaMaintenanceSolution {
             }
             Write-ProgressHelper -ExcludePercent -Message "Ola Hallengren's solution will be installed on database $Database"
 
-            $db = $server.Databases[$Database]
-
             if ($Solution -notcontains 'All') {
                 $required = @('CommandExecute.sql')
             }
 
-            if ($LogToTable) {
+            if ($LogToTable -and $InstallJobs -eq $false) {
                 $required += 'CommandLog.sql'
             }
 
@@ -331,22 +292,35 @@ function Install-DbaMaintenanceSolution {
                 $required += 'IndexOptimize.sql'
             }
 
-            if ($Solution -contains 'All') {
+            if ($Solution -contains 'All' -and $InstallJobs) {
                 $required += 'MaintenanceSolution.sql'
             }
 
-            $temp = ([System.IO.Path]::GetTempPath()).TrimEnd("\")
-            $zipfile = "$temp\ola.zip"
+            if ($Solution -contains 'All' -and $InstallJobs -eq $false) {
+                $required += 'CommandExecute.sql'
+                $required += 'DatabaseBackup.sql'
+                $required += 'DatabaseIntegrityCheck.sql'
+                $required += 'IndexOptimize.sql'
+            }
 
-            $listOfFiles = Get-ChildItem -Filter "*.sql" -Path $LocalCachedCopy -Recurse | Select-Object -ExpandProperty FullName
+            if ($InstallParallel) {
+                $required += 'Queue.sql'
+                $required += 'QueueDatabase.sql'
+            }
+
+            $listOfFiles = Get-ChildItem -Filter "*.sql" -Path $localCachedCopy -Recurse | Select-Object -ExpandProperty FullName
 
             $fileContents = Get-DbaOlaWithParameters -listOfFiles $listOfFiles
 
-            $CleanupQuery = $null
+            $cleanupQuery = $null
             if ($ReplaceExisting) {
-                [string]$CleanupQuery = $("
+                [string]$cleanupQuery = $("
                             IF OBJECT_ID('[dbo].[CommandLog]', 'U') IS NOT NULL
                                 DROP TABLE [dbo].[CommandLog];
+                            IF OBJECT_ID('[dbo].[QueueDatabase]', 'U') IS NOT NULL
+                                DROP TABLE [dbo].[QueueDatabase];
+                            IF OBJECT_ID('[dbo].[Queue]', 'U') IS NOT NULL
+                                DROP TABLE [dbo].[Queue];
                             IF OBJECT_ID('[dbo].[CommandExecute]', 'P') IS NOT NULL
                                 DROP PROCEDURE [dbo].[CommandExecute];
                             IF OBJECT_ID('[dbo].[DatabaseBackup]', 'P') IS NOT NULL
@@ -359,7 +333,7 @@ function Install-DbaMaintenanceSolution {
 
                 if ($Pscmdlet.ShouldProcess($instance, "Dropping all objects created by Ola's Maintenance Solution")) {
                     Write-ProgressHelper -ExcludePercent -Message "Dropping objects created by Ola's Maintenance Solution"
-                    $null = $db.Query($CleanupQuery)
+                    $null = $db.Invoke($cleanupQuery)
                 }
 
                 # Remove Ola's Jobs
@@ -376,42 +350,35 @@ function Install-DbaMaintenanceSolution {
                 }
             }
 
-            try {
-                Write-ProgressHelper -ExcludePercent -Message "Installing on server $instance, database $Database"
+            Write-ProgressHelper -ExcludePercent -Message "Installing on server $instance, database $Database"
 
-                foreach ($file in $fileContents.Keys) {
-                    $shortFileName = Split-Path $file -Leaf
-                    if ($required.Contains($shortFileName)) {
-                        if ($Pscmdlet.ShouldProcess($instance, "Installing $shortFileName")) {
-                            Write-ProgressHelper -ExcludePercent -Message "Installing $shortFileName"
-                            $sql = $fileContents[$file]
-                            try {
-                                foreach ($query in ($sql -Split "\nGO\b")) {
-                                    $null = $db.Query($query)
-                                }
-                            } catch {
-                                Stop-Function -Message "Could not execute $shortFileName in $Database on $instance" -ErrorRecord $_ -Target $db -Continue
+            $result = "Success"
+            foreach ($file in $fileContents.Keys | Sort-Object) {
+                $shortFileName = Split-Path $file -Leaf
+                if ($required.Contains($shortFileName)) {
+                    if ($Pscmdlet.ShouldProcess($instance, "Installing $shortFileName")) {
+                        Write-ProgressHelper -ExcludePercent -Message "Installing $shortFileName"
+                        $sql = $fileContents[$file]
+                        try {
+                            foreach ($query in ($sql -Split "\nGO\b")) {
+                                $null = $db.Invoke($query)
                             }
+                        } catch {
+                            $result = "Failed"
+                            Stop-Function -Message "Could not execute $shortFileName in $Database on $instance" -ErrorRecord $_ -Target $db -Continue
                         }
                     }
                 }
-            } catch {
-                Stop-Function -Message "Could not execute $shortFileName in $Database on $instance." -ErrorRecord $_ -Target $db -Continue
             }
-
             [pscustomobject]@{
                 ComputerName = $server.ComputerName
                 InstanceName = $server.ServiceName
                 SqlInstance  = $instance
-                Results      = "Success"
+                Results      = $result
             }
-        }
-        # Only here due to need for non-pooled connection in this command
-        try {
-            $server.ConnectionContext.Disconnect()
-        } catch {
-            # here to avoid an empty catch
-            $null = 1
+
+            # Close non-pooled connection as this is not done automatically. If it is a reused Server SMO, connection will be opened again automatically on next request.
+            $null = $server | Disconnect-DbaInstance
         }
 
         Write-ProgressHelper -ExcludePercent -Message "Installation complete"

@@ -21,14 +21,12 @@ function Invoke-DbaAsync {
             Specifies the number of seconds before the queries time out.
 
         .PARAMETER As
-            Specifies output type. Valid options for this parameter are 'DataSet', 'DataTable', 'DataRow', 'PSObject', and 'SingleValue'
+            Specifies output type. Valid options for this parameter are 'DataSet', 'DataTable', 'DataRow', 'PSObject', 'PSObjectArray', and 'SingleValue'
 
-            PSObject output introduces overhead but adds flexibility for working with results: http://powershell.org/wp/forums/topic/dealing-with-dbnull/
+            PSObject and PSObjectArray output introduces overhead but adds flexibility for working with results: http://powershell.org/wp/forums/topic/dealing-with-dbnull/
 
-        .PARAMETER SqlParameters
-            Specifies a hashtable of parameters for parameterized SQL queries.  http://blog.codinghorror.com/give-me-parameterized-sql-or-give-me-death/
-
-            Example:
+        .PARAMETER SqlParameter
+            Specifies a hashtable of parameters or output from New-DbaSqlParameter for parameterized SQL queries.  http://blog.codinghorror.com/give-me-parameterized-sql-or-give-me-death/
 
         .PARAMETER AppendServerInstance
             If this switch is enabled, the SQL Server instance will be appended to PSObject and DataRow output.
@@ -53,12 +51,12 @@ function Invoke-DbaAsync {
         [string]
         $Query,
 
-        [ValidateSet("DataSet", "DataTable", "DataRow", "PSObject", "SingleValue")]
+        [ValidateSet("DataSet", "DataTable", "DataRow", "PSObject", "PSObjectArray", "SingleValue")]
         [string]
         $As = "DataRow",
 
-        [System.Collections.IDictionary]
-        $SqlParameters,
+        [Alias("SqlParameters")]
+        [psobject[]]$SqlParameter,
 
         [System.Data.CommandType]
         $CommandType = 'Text',
@@ -75,6 +73,13 @@ function Invoke-DbaAsync {
     )
 
     begin {
+        if ($PSBoundParameters.SqlParameter) {
+            $first = $SqlParameter | Select-Object -First 1
+            if ($first -isnot [Microsoft.Data.SqlClient.SqlParameter] -and ($first -isnot [System.Collections.IDictionary] -or $SqlParameter -is [System.Collections.IDictionary[]])) {
+                Stop-Function -Message "SqlParameter only accepts a single hashtable or Microsoft.Data.SqlClient.SqlParameter"
+                return
+            }
+        }
         function Resolve-SqlError {
             param($Err)
             if ($Err) {
@@ -108,7 +113,7 @@ function Invoke-DbaAsync {
 
         }
 
-        if ($As -eq "PSObject") {
+        if ($As -in "PSObject", "PSObjectArray") {
             #This code scrubs DBNulls.  Props to Dave Wyatt
             $cSharp = @'
                 using System;
@@ -159,6 +164,7 @@ function Invoke-DbaAsync {
 
     }
     process {
+        if (Test-FunctionInterrupt) { return }
         $Conn = $SQLConnection.SqlConnectionObject
 
 
@@ -168,23 +174,35 @@ function Invoke-DbaAsync {
         # Only execute non-empty statements
         $Pieces = $Pieces | Where-Object { $_.Trim().Length -gt 0 }
         foreach ($piece in $Pieces) {
-            $cmd = New-Object system.Data.SqlClient.SqlCommand($piece, $conn)
+            $cmd = New-Object Microsoft.Data.SqlClient.SqlCommand($piece, $conn)
             $cmd.CommandType = $CommandType
             $cmd.CommandTimeout = $QueryTimeout
 
-            if ($null -ne $SqlParameters) {
-                $SqlParameters.GetEnumerator() |
-                    ForEach-Object {
+            if ($null -ne $SqlParameter) {
+                if (($SqlParameter | Select-Object -First 1) -is [Microsoft.Data.SqlClient.SqlParameter]) {
+                    foreach ($sqlparam in $SqlParameter) {
+                        $null = $cmd.Parameters.Add($sqlparam)
+                    }
+                } else {
+                    ($SqlParameter | Select-Object -First 1).GetEnumerator() | ForEach-Object {
                         if ($null -ne $_.Value) {
-                            $cmd.Parameters.AddWithValue($_.Key, $_.Value)
+                            if (($_.Value -is [Microsoft.Data.SqlClient.SqlParameter])) {
+                                if ($_.Value.ParameterName -ne $_.Key) {
+                                    $_.Value.ParameterName = $_.Key
+                                }
+                                $cmd.Parameters.Add($_.Value)
+                            } else {
+                                $cmd.Parameters.AddWithValue($_.Key, $_.Value)
+                            }
                         } else {
                             $cmd.Parameters.AddWithValue($_.Key, [DBNull]::Value)
                         }
                     } > $null
+                }
             }
 
-            $ds = New-Object system.Data.DataSet
-            $da = New-Object system.Data.SqlClient.SqlDataAdapter($cmd)
+            $ds = New-Object System.Data.DataSet
+            $da = New-Object Microsoft.Data.SqlClient.SqlDataAdapter($cmd)
 
             if ($MessagesToOutput) {
                 $defaultrunspace = [System.Management.Automation.Runspaces.Runspace]::DefaultRunspace
@@ -195,7 +213,7 @@ function Invoke-DbaAsync {
                 $scriptBlock = {
                     param ($da, $ds, $conn, $queue )
                     $conn.FireInfoMessageEventOnUserErrors = $false
-                    $handler = [System.Data.SqlClient.SqlInfoMessageEventHandler] { $queue.Enqueue($_) }
+                    $handler = [Microsoft.Data.SqlClient.SqlInfoMessageEventHandler] { $queue.Enqueue($_) }
                     $conn.add_InfoMessage($handler)
                     $Err = $null
                     try {
@@ -244,7 +262,7 @@ function Invoke-DbaAsync {
                 #Following EventHandler is used for PRINT and RAISERROR T-SQL statements. Executed when -Verbose parameter specified by caller and no -MessageToOutput
                 if ($PSBoundParameters.Verbose) {
                     $conn.FireInfoMessageEventOnUserErrors = $false
-                    $handler = [System.Data.SqlClient.SqlInfoMessageEventHandler] { Write-Verbose -Message "$($_)" }
+                    $handler = [Microsoft.Data.SqlClient.SqlInfoMessageEventHandler] { Write-Verbose -Message "$($_)" }
                     $conn.add_InfoMessage($handler)
                 }
                 try {
@@ -284,12 +302,20 @@ function Invoke-DbaAsync {
                     }
                 }
                 'PSObject' {
-                    if ($ds.Tables.Count -ne 0) {
+                    foreach ($table in $ds.Tables) {
                         #Scrub DBNulls - Provides convenient results you can use comparisons with
                         #Introduces overhead (e.g. ~2000 rows w/ ~80 columns went from .15 Seconds to .65 Seconds - depending on your data could be much more!)
-                        foreach ($row in $ds.Tables[0].Rows) {
+                        foreach ($row in $table.Rows) {
                             [DBNullScrubber]::DataRowToPSObject($row)
                         }
+                    }
+                }
+                'PSObjectArray' {
+                    foreach ($table in $ds.Tables) {
+                        $rows = foreach ($row in $table.Rows) {
+                            [DBNullScrubber]::DataRowToPSObject($row)
+                        }
+                        , $rows
                     }
                 }
                 'SingleValue' {

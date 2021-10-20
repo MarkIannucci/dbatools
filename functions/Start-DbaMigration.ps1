@@ -48,7 +48,7 @@ function Start-DbaMigration {
     .PARAMETER Destination
         Destination SQL Server. You may specify multiple servers.
 
-        Note that when using -BackupRestore with multiple servers, the backup will only be performed once and backups will be deleted at the end (if you didn't specify -ExcludeBackupCleanup).
+        Note that when using -BackupRestore with multiple servers, the backup will only be performed once and backups will be deleted at the end.
 
         When using -DetachAttach with multiple servers, -Reattach must be specified.
 
@@ -269,7 +269,6 @@ function Start-DbaMigration {
 
         $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
         $started = Get-Date
-        $sourceserver = Connect-SqlInstance -SqlInstance $Source -SqlCredential $SourceSqlCredential
     }
 
     process {
@@ -310,6 +309,14 @@ function Start-DbaMigration {
         if ($UseLastBackup -and -not $BackupRestore) {
             $BackupRestore = $true
         }
+
+        try {
+            $sourceserver = Connect-DbaInstance -SqlInstance $Source -SqlCredential $SourceSqlCredential
+        } catch {
+            Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $Source
+            return
+        }
+
         if ($Exclude -notcontains 'SpConfigure') {
             Write-Message -Level Verbose -Message "Migrating SQL Server Configuration"
             Copy-DbaSpConfigure -Source $sourceserver -Destination $Destination -DestinationSqlCredential $DestinationSqlCredential

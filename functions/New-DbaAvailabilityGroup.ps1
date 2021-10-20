@@ -12,14 +12,24 @@ function New-DbaAvailabilityGroup {
         * Adds secondary replica if supplied
         * Adds databases if supplied
             * Performs backup/restore if seeding mode is manual
-            * Performs backup to NUL if seeding mode is automatic
+            * Database has to be in full recovery mode (so at least one backup has been taken) if seeding mode is automatic
         * Adds listener to primary if supplied
         * Joins secondaries to availability group
         * Grants endpoint connect permissions to service accounts
         * Grants CreateAnyDatabase permissions if seeding mode is automatic
         * Returns Availability Group object from primary
 
-        NOTE: If a backup / restore is performed, the backups will be left intact on the network share.
+        NOTES:
+        - If a backup / restore is performed, the backups will be left intact on the network share.
+        - If you're using SQL Server on Linux and a fully qualified domain name is required, please use the FQDN to create a proper Endpoint
+
+        PLEASE NOTE THE CHANGED DEFAULTS:
+        Starting with version 1.1.x we changed the defaults of the following parameters to have the same defaults
+        as the T-SQL command "CREATE AVAILABILITY GROUP" and the wizard in SQL Server Management Studio:
+        * ClusterType from External to Wsfc (Windows Server Failover Cluster).
+        * FailureConditionLevel from OnServerDown (Level 1) to OnCriticalServerErrors (Level 3).
+        * ConnectionModeInSecondaryRole from AllowAllConnections (ALL) to AllowNoConnections (NO).
+        To change these defaults we have introduced configuration parameters for all of them, see documentation of the parameters for details.
 
         Thanks for this, Thomas Stringer! https://blogs.technet.microsoft.com/heyscriptingguy/2013/04/29/set-up-an-alwayson-availability-group-with-powershell/
 
@@ -51,13 +61,30 @@ function New-DbaAvailabilityGroup {
 
     .PARAMETER ClusterType
         Cluster type of the Availability Group. Only supported in SQL Server 2017 and above.
-        Options include: External, Wsfc or None. None by default.
+        Options include: Wsfc, External or None.
+
+        Defaults to Wsfc (Windows Server Failover Cluster).
+
+        The default can be changed with:
+        Set-DbatoolsConfig -FullName 'AvailabilityGroups.Default.ClusterType' -Value '...' -Passthru | Register-DbatoolsConfig
 
     .PARAMETER AutomatedBackupPreference
         Specifies how replicas in the primary role are treated in the evaluation to pick the desired replica to perform a backup.
 
     .PARAMETER FailureConditionLevel
         Specifies the different conditions that can trigger an automatic failover in Availability Group.
+
+        Defaults to OnCriticalServerErrors (Level 3).
+
+        From https://docs.microsoft.com/en-us/sql/t-sql/statements/create-availability-group-transact-sql:
+            Level 1 = OnServerDown
+            Level 2 = OnServerUnresponsive
+            Level 3 = OnCriticalServerErrors (the default in CREATE AVAILABILITY GROUP and in this command)
+            Level 4 = OnModerateServerErrors
+            Level 5 = OnAnyQualifiedFailureCondition
+
+        The default can be changed with:
+        Set-DbatoolsConfig -FullName 'AvailabilityGroups.Default.FailureConditionLevel' -Value 'On...' -Passthru | Register-DbatoolsConfig
 
     .PARAMETER HealthCheckTimeout
         This setting used to specify the length of time, in milliseconds, that the SQL Server resource DLL should wait for information returned by the sp_server_diagnostics stored procedure before reporting the Always On Failover Cluster Instance (FCI) as unresponsive.
@@ -107,11 +134,25 @@ function New-DbaAvailabilityGroup {
 
         If an endpoint must be created, the name "hadr_endpoint" will be used. If an alternative is preferred, use Endpoint.
 
+    .PARAMETER EndpointUrl
+        By default, the property Fqdn of Get-DbaEndpoint is used as EndpointUrl.
+
+        Use EndpointUrl if different URLs are required due to special network configurations.
+        EndpointUrl has to be an array of strings in format 'TCP://system-address:port', one entry for every instance.
+        First entry for the primary instance, following entries for secondary instances in the order they show up in Secondary.
+        See details regarding the format at: https://docs.microsoft.com/en-us/sql/database-engine/availability-groups/windows/specify-endpoint-url-adding-or-modifying-availability-replica
+
     .PARAMETER ConnectionModeInPrimaryRole
         Specifies the connection intent modes of an Availability Replica in primary role. AllowAllConnections by default.
 
     .PARAMETER ConnectionModeInSecondaryRole
-        Specifies the connection modes of an Availability Replica in secondary role. AllowAllConnections by default.
+        Specifies the connection modes of an Availability Replica in secondary role.
+        Options include: AllowNoConnections (Alias: No), AllowReadIntentConnectionsOnly (Alias: Read-intent only),  AllowAllConnections (Alias: Yes)
+
+        Defaults to AllowNoConnections.
+
+        The default can be changed with:
+        Set-DbatoolsConfig -FullName 'AvailabilityGroups.Default.ConnectionModeInSecondaryRole' -Value '...' -Passthru | Register-DbatoolsConfig
 
     .PARAMETER ReadonlyRoutingConnectionUrl
         Sets the read only routing connection url for the availability replica.
@@ -127,6 +168,10 @@ function New-DbaAvailabilityGroup {
         Specifies that the endpoint is to authenticate the connection using the certificate specified by certificate_name to establish identity for authorization.
 
         The far endpoint must have a certificate with the public key matching the private key of the specified certificate.
+
+    .PARAMETER ConfigureXESession
+        Configure the AlwaysOn_health extended events session to start automatically on every replica as the SSMS wizard would do.
+        https://docs.microsoft.com/en-us/sql/database-engine/availability-groups/windows/always-on-extended-events#BKMK_alwayson_health
 
     .PARAMETER IPAddress
         Sets the IP address of the availability group listener.
@@ -178,7 +223,7 @@ function New-DbaAvailabilityGroup {
         Creates a basic availability group named BAG1 on sql2016std and does not confirm when setting up
 
     .EXAMPLE
-        PS C:\> New-DbaAvailabilityGroup -Primary sql2016b -Name AG1 -ClusterType Wsfc -Dhcp -Database db1 -UseLastBackup
+        PS C:\> New-DbaAvailabilityGroup -Primary sql2016b -Name AG1 -Dhcp -Database db1 -UseLastBackup
 
         Creates an availability group on sql2016b with the name ag1. Uses the last backups available to add the database db1 to the AG.
 
@@ -191,6 +236,11 @@ function New-DbaAvailabilityGroup {
         PS C:\> New-DbaAvailabilityGroup -Primary sql1 -Secondary sql2 -Name ag1 -Database pubs -ClusterType None -SeedingMode Automatic -FailoverMode Manual
 
         Creates a new availability group with a primary replica on sql1 and a secondary on sql2. Automatically adds the database pubs.
+
+    .EXAMPLE
+        PS C:\> New-DbaAvailabilityGroup -Primary sql1 -Secondary sql2 -Name ag1 -Database pubs -EndpointUrl 'TCP://sql1.specialnet.local:5022', 'TCP://sql2.specialnet.local:5022'
+
+        Creates a new availability group with a primary replica on sql1 and a secondary on sql2 with custom endpoint urls. Automatically adds the database pubs.
 
     .EXAMPLE
         PS C:\> $cred = Get-Credential sqladmin
@@ -222,12 +272,12 @@ function New-DbaAvailabilityGroup {
         [parameter(Mandatory)]
         [string]$Name,
         [switch]$DtcSupport,
-        [ValidateSet('External', 'Wsfc', 'None')]
-        [string]$ClusterType = 'External',
+        [ValidateSet('Wsfc', 'External', 'None')]
+        [string]$ClusterType = (Get-DbatoolsConfigValue -FullName 'AvailabilityGroups.Default.ClusterType' -Fallback 'Wsfc'),
         [ValidateSet('None', 'Primary', 'Secondary', 'SecondaryOnly')]
         [string]$AutomatedBackupPreference = 'Secondary',
         [ValidateSet('OnAnyQualifiedFailureCondition', 'OnCriticalServerErrors', 'OnModerateServerErrors', 'OnServerDown', 'OnServerUnresponsive')]
-        [string]$FailureConditionLevel = "OnServerDown",
+        [string]$FailureConditionLevel = (Get-DbatoolsConfigValue -FullName 'AvailabilityGroups.Default.FailureConditionLevel' -Fallback 'OnCriticalServerErrors'),
         [int]$HealthCheckTimeout = 30000,
         [switch]$Basic,
         [switch]$DatabaseHealthTrigger,
@@ -247,13 +297,15 @@ function New-DbaAvailabilityGroup {
         [int]$BackupPriority = 50,
         [ValidateSet('AllowAllConnections', 'AllowReadWriteConnections')]
         [string]$ConnectionModeInPrimaryRole = 'AllowAllConnections',
-        [ValidateSet('AllowAllConnections', 'AllowNoConnections', 'AllowReadIntentConnectionsOnly', 'No', 'Read-intent only', 'Yes')]
-        [string]$ConnectionModeInSecondaryRole = 'AllowAllConnections',
+        [ValidateSet('AllowNoConnections', 'AllowReadIntentConnectionsOnly', 'AllowAllConnections', 'No', 'Read-intent only', 'Yes')]
+        [string]$ConnectionModeInSecondaryRole = (Get-DbatoolsConfigValue -FullName 'AvailabilityGroups.Default.ConnectionModeInSecondaryRole' -Fallback 'AllowNoConnections'),
         [ValidateSet('Automatic', 'Manual')]
         [string]$SeedingMode = 'Manual',
         [string]$Endpoint,
+        [string[]]$EndpointUrl,
         [string]$ReadonlyRoutingConnectionUrl,
         [string]$Certificate,
+        [switch]$ConfigureXESession,
         # network
 
         [ipaddress[]]$IPAddress,
@@ -273,6 +325,19 @@ function New-DbaAvailabilityGroup {
             return
         }
 
+        if ($EndpointUrl) {
+            if ($EndpointUrl.Count -ne (1 + $Secondary.Count)) {
+                Stop-Function -Message "The number of elements in EndpointUrl is not correct"
+                return
+            }
+            foreach ($epUrl in $EndpointUrl) {
+                if ($epUrl -notmatch 'TCP://.+:\d+') {
+                    Stop-Function -Message "EndpointUrl '$epUrl' not in correct format 'TCP://system-address:port'"
+                    return
+                }
+            }
+        }
+
         if ($ConnectionModeInSecondaryRole) {
             $ConnectionModeInSecondaryRole =
             switch ($ConnectionModeInSecondaryRole) {
@@ -283,10 +348,15 @@ function New-DbaAvailabilityGroup {
             }
         }
 
+        if ($IPAddress -and $Dhcp) {
+            Stop-Function -Message "You cannot specify both an IP address and the Dhcp switch for the listener."
+            return
+        }
+
         try {
-            $server = Connect-SqlInstance -SqlInstance $Primary -SqlCredential $PrimarySqlCredential
+            $server = Connect-DbaInstance -SqlInstance $Primary -SqlCredential $PrimarySqlCredential
         } catch {
-            Stop-Function -Message "Error occurred while establishing connection to $Primary" -Category ConnectionError -ErrorRecord $_ -Target $Primary
+            Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $Primary
             return
         }
 
@@ -315,10 +385,10 @@ function New-DbaAvailabilityGroup {
             }
             foreach ($instance in $Secondary) {
                 try {
-                    $second = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SecondarySqlCredential
+                    $second = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SecondarySqlCredential
                     $secondaries += $second
                 } catch {
-                    Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance
+                    Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
                 }
 
                 if (-not $second.IsHadrEnabled) {
@@ -448,6 +518,12 @@ function New-DbaAvailabilityGroup {
                     Endpoint                      = $Endpoint
                     ReadonlyRoutingConnectionUrl  = $ReadonlyRoutingConnectionUrl
                     Certificate                   = $Certificate
+                    ConfigureXESession            = $ConfigureXESession
+                }
+
+                if ($EndpointUrl) {
+                    $epUrl, $EndpointUrl = $EndpointUrl
+                    $replicaparams += @{EndpointUrl = $epUrl }
                 }
 
                 if ($server.VersionMajor -ge 13) {
@@ -469,20 +545,18 @@ function New-DbaAvailabilityGroup {
         if ($ClusterType -eq 'Wsfc') {
             Write-ProgressHelper -StepNumber ($stepCounter++) -Message "Adding endpoint connect permissions"
 
-            foreach ($second in $secondaries) {
-                if ($Pscmdlet.ShouldProcess($Primary, "Adding cluster permissions for availability group named $Name")) {
-                    Write-Message -Level Verbose -Message "WSFC Cluster requires granting [NT AUTHORITY\SYSTEM] a few things. Setting now."
-                    $sql = "GRANT ALTER ANY AVAILABILITY GROUP TO [NT AUTHORITY\SYSTEM]
-                        GRANT CONNECT SQL TO [NT AUTHORITY\SYSTEM]
-                        GRANT VIEW SERVER STATE TO [NT AUTHORITY\SYSTEM]"
-                    try {
-                        $null = $server.Query($sql)
-                        foreach ($second in $secondaries) {
-                            $null = $second.Query($sql)
-                        }
-                    } catch {
-                        Stop-Function -Message "Failure adding cluster service account permissions" -ErrorRecord $_
+            if ($Pscmdlet.ShouldProcess($Primary, "Adding cluster permissions for availability group named $Name")) {
+                Write-Message -Level Verbose -Message "WSFC Cluster requires granting [NT AUTHORITY\SYSTEM] a few things. Setting now."
+                $sql = "GRANT ALTER ANY AVAILABILITY GROUP TO [NT AUTHORITY\SYSTEM]
+                    GRANT CONNECT SQL TO [NT AUTHORITY\SYSTEM]
+                    GRANT VIEW SERVER STATE TO [NT AUTHORITY\SYSTEM]"
+                try {
+                    $null = $server.Query($sql)
+                    foreach ($second in $secondaries) {
+                        $null = $second.Query($sql)
                     }
+                } catch {
+                    Stop-Function -Message "Failure adding cluster service account permissions" -ErrorRecord $_
                 }
             }
         }
@@ -494,6 +568,11 @@ function New-DbaAvailabilityGroup {
             if ($Pscmdlet.ShouldProcess($second.Name, "Adding replica to availability group named $Name")) {
                 try {
                     # Add replicas
+                    if ($EndpointUrl) {
+                        $epUrl, $EndpointUrl = $EndpointUrl
+                        $replicaparams['EndpointUrl'] = $epUrl
+                    }
+
                     $null = Add-DbaAgReplica @replicaparams -EnableException -SqlInstance $second
                 } catch {
                     Stop-Function -Message "Failure" -ErrorRecord $_ -Target $second -Continue
@@ -522,16 +601,12 @@ function New-DbaAvailabilityGroup {
         Write-ProgressHelper -StepNumber ($stepCounter++) -Message $progressmsg
 
         if ($IPAddress) {
-            if ($Pscmdlet.ShouldProcess($Primary, "Adding static IP listener for $Name to the Primary replica")) {
-                $null = Add-DbaAgListener -InputObject $ag -IPAddress $IPAddress -SubnetMask $SubnetMask -Port $Port -Dhcp:$Dhcp
+            if ($Pscmdlet.ShouldProcess($Primary, "Adding static IP listener for $Name to the primary replica")) {
+                $null = Add-DbaAgListener -InputObject $ag -IPAddress $IPAddress -SubnetMask $SubnetMask -Port $Port
             }
         } elseif ($Dhcp) {
-            if ($Pscmdlet.ShouldProcess($Primary, "Adding DHCP listener for $Name to all replicas")) {
-                $null = Add-DbaAgListener -InputObject $ag -Port $Port -Dhcp:$Dhcp
-                foreach ($second in $secondaries) {
-                    $secag = Get-DbaAvailabilityGroup -SqlInstance $second -AvailabilityGroup $Name
-                    $null = Add-DbaAgListener -InputObject $secag -Port $Port -Dhcp:$Dhcp
-                }
+            if ($Pscmdlet.ShouldProcess($Primary, "Adding DHCP listener for $Name to the primary replica")) {
+                $null = Add-DbaAgListener -InputObject $ag -Port $Port -Dhcp
             }
         }
 
@@ -545,63 +620,19 @@ function New-DbaAvailabilityGroup {
                 } catch {
                     Stop-Function -Message "Failure" -ErrorRecord $_ -Target $second -Continue
                 }
+                $second.AvailabilityGroups.Refresh()
             }
         }
 
         Write-ProgressHelper -StepNumber ($stepCounter++) -Message "Granting permissions on availability group, this may take a moment"
-
-        # Grant permissions, but first, get all necessary service accounts
-        $primaryserviceaccount = $server.ServiceAccount.Trim()
-        $saname = ([DbaInstanceParameter]($server.DomainInstanceName)).ComputerName
-
-        if ($primaryserviceaccount) {
-            if ($primaryserviceaccount.StartsWith("NT ")) {
-                $primaryserviceaccount = "$saname`$"
-            }
-            if ($primaryserviceaccount.StartsWith("$saname")) {
-                $primaryserviceaccount = "$saname`$"
-            }
-            if ($primaryserviceaccount.StartsWith(".")) {
-                $primaryserviceaccount = "$saname`$"
-            }
-        }
-
-        if (-not $primaryserviceaccount) {
-            $primaryserviceaccount = "$saname`$"
-        }
-
-        $serviceAccounts = @($primaryserviceaccount)
-
-        foreach ($second in $secondaries) {
-            # If service account is empty, add the computer account instead
-            $secondaryserviceaccount = $second.ServiceAccount.Trim()
-            $saname = ([DbaInstanceParameter]($second.DomainInstanceName)).ComputerName
-
-            if ($secondaryserviceaccount) {
-                if ($secondaryserviceaccount.StartsWith("NT ")) {
-                    $secondaryserviceaccount = "$saname`$"
-                }
-                if ($secondaryserviceaccount.StartsWith("$saname")) {
-                    $secondaryserviceaccount = "$saname`$"
-                }
-                if ($secondaryserviceaccount.StartsWith(".")) {
-                    $secondaryserviceaccount = "$saname`$"
-                }
-            }
-
-            if (-not $secondaryserviceaccount) {
-                $secondaryserviceaccount = "$saname`$"
-            }
-
-            $serviceAccounts += $secondaryserviceaccount
-        }
-
-        $serviceAccounts = $serviceAccounts | Select-Object -Unique
-
         if ($SeedingMode -eq 'Automatic') {
             try {
                 if ($Pscmdlet.ShouldProcess($server.Name, "Seeding mode is automatic. Adding CreateAnyDatabase permissions to availability group.")) {
-                    $null = $server.Query("ALTER AVAILABILITY GROUP [$Name] GRANT CREATE ANY DATABASE")
+                    $sql = "ALTER AVAILABILITY GROUP [$Name] GRANT CREATE ANY DATABASE"
+                    $null = $server.Query($sql)
+                    foreach ($second in $secondaries) {
+                        $null = $second.Query($sql)
+                    }
                 }
             } catch {
                 # Log the exception but keep going
@@ -611,43 +642,33 @@ function New-DbaAvailabilityGroup {
 
         # Add databases
         Write-ProgressHelper -StepNumber ($stepCounter++) -Message "Adding databases"
-        $dbdone = $false
-        do {
-            foreach ($second in $secondaries) {
-                if ($SeedingMode -eq 'Automatic') {
-                    $done = $false
+        if ($Database) {
+            if ($Pscmdlet.ShouldProcess($server.Name, "Adding databases to Availability Group.")) {
+                if ($Force) {
                     try {
-                        if ($Pscmdlet.ShouldProcess($second.Name, "Seeding mode is automatic. Adding CreateAnyDatabase permissions to availability group.")) {
-                            do {
-                                $second.Refresh()
-                                $second.AvailabilityGroups.Refresh()
-                                if (Get-DbaAvailabilityGroup -SqlInstance $second -AvailabilityGroup $Name) {
-                                    $null = $second.Query("ALTER AVAILABILITY GROUP [$Name] GRANT CREATE ANY DATABASE")
-                                    $done = $true
-                                } else {
-                                    $wait++
-                                    Start-Sleep -Seconds 1
-                                }
-                            } while ($wait -lt 20 -and $done -eq $false)
-                        }
+                        Get-DbaDatabase -SqlInstance $secondaries -Database $Database -EnableException | Remove-DbaDatabase -EnableException
                     } catch {
-                        # Log the exception but keep going
-                        Stop-Function -Message "Failure" -ErrorRecord $_
+                        Stop-Function -Message "Failed to remove databases from secondary replicas." -ErrorRecord $_
                     }
                 }
-                if ($Database) {
-                    $null = Add-DbaAgDatabase -SqlInstance $Primary -SqlCredential $PrimarySqlCredential -AvailabilityGroup $Name -Database $Database -SeedingMode $SeedingMode -SharedPath $SharedPath -UseLastBackup:$UseLastBackup -Secondary $Secondary -SecondarySqlCredential $SecondarySqlCredential
+
+                $addDatabaseParams = @{
+                    SqlInstance       = $server
+                    AvailabilityGroup = $Name
+                    Database          = $Database
+                    Secondary         = $secondaries
+                    UseLastBackup     = $UseLastBackup
+                    EnableException   = $true
+                }
+                if ($SeedingMode) { $addDatabaseParams['SeedingMode'] = $SeedingMode }
+                if ($SharedPath) { $addDatabaseParams['SharedPath'] = $SharedPath }
+                try {
+                    $null = Add-DbaAgDatabase @addDatabaseParams
+                } catch {
+                    Stop-Function -Message "Failed to add databases to Availability Group." -ErrorRecord $_
                 }
             }
-
-            if (-not $Database -or (Get-DbaAgDatabase -SqlInstance $Primary -SqlCredential $PrimarySqlCredential -AvailabilityGroup $Name -Database $Database)) {
-                $dbdone = $true
-            } else {
-                $null = Add-DbaAgDatabase -SqlInstance $Primary -SqlCredential $PrimarySqlCredential -AvailabilityGroup $Name -Database $Database -SeedingMode $SeedingMode -SharedPath $SharedPath -UseLastBackup:$UseLastBackup -Secondary $Secondary -SecondarySqlCredential $SecondarySqlCredential -WarningAction SilentlyContinue
-                $dbwait++
-                Start-Sleep -Seconds 1
-            }
-        } while ($dbwait -lt 20 -and $dbdone -eq $false)
+        }
 
         # Get results
         Get-DbaAvailabilityGroup -SqlInstance $Primary -SqlCredential $PrimarySqlCredential -AvailabilityGroup $Name

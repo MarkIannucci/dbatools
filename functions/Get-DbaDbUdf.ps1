@@ -25,6 +25,18 @@ function Get-DbaDbUdf {
     .PARAMETER ExcludeSystemUdf
         This switch removes all system objects from the UDF collection
 
+    .PARAMETER Schema
+        The schema(s) to process. If unspecified, all schemas will be processed.
+
+    .PARAMETER ExcludeSchema
+        The schema(s) to exclude.
+
+    .PARAMETER Name
+        The name(s) of the user defined functions to process. If unspecified, all user defined functions will be processed.
+
+    .PARAMETER ExcludeName
+        The name(s) of the user defined functions to exclude.
+
     .PARAMETER EnableException
         By default, when something goes wrong we try to catch it, interpret it and give you a friendly warning message.
         This avoids overwhelming you with "sea of red" exceptions, but is inconvenient because it basically disables advanced scripting.
@@ -75,15 +87,19 @@ function Get-DbaDbUdf {
         [object[]]$Database,
         [object[]]$ExcludeDatabase,
         [switch]$ExcludeSystemUdf,
+        [string[]]$Schema,
+        [string[]]$ExcludeSchema,
+        [string[]]$Name,
+        [string[]]$ExcludeName,
         [switch]$EnableException
     )
 
     process {
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $sqlcredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Error occurred while establishing connection to $instance" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             $databases = $server.Databases | Where-Object IsAccessible
@@ -97,22 +113,38 @@ function Get-DbaDbUdf {
 
             foreach ($db in $databases) {
 
-                $UserDefinedFunctions = $db.UserDefinedFunctions
+                $userDefinedFunctions = $db.UserDefinedFunctions
 
-                if (!$UserDefinedFunctions) {
+                if (!$userDefinedFunctions) {
                     Write-Message -Message "No User Defined Functions exist in the $db database on $instance" -Target $db -Level Verbose
                     continue
                 }
                 if (Test-Bound -ParameterName ExcludeSystemUdf) {
-                    $UserDefinedFunctions = $UserDefinedFunctions | Where-Object { $_.IsSystemObject -eq $false }
+                    $userDefinedFunctions = $userDefinedFunctions | Where-Object IsSystemObject -eq $false
                 }
 
-                $UserDefinedFunctions | ForEach-Object {
+                if ($Schema) {
+                    $userDefinedFunctions = $userDefinedFunctions | Where-Object Schema -in $Schema
+                }
 
-                    Add-Member -Force -InputObject $_ -MemberType NoteProperty -Name ComputerName -value $server.ComputerName
-                    Add-Member -Force -InputObject $_ -MemberType NoteProperty -Name InstanceName -value $server.ServiceName
-                    Add-Member -Force -InputObject $_ -MemberType NoteProperty -Name SqlInstance -value $server.DomainInstanceName
-                    Add-Member -Force -InputObject $_ -MemberType NoteProperty -Name Database -value $db.Name
+                if ($ExcludeSchema) {
+                    $userDefinedFunctions = $userDefinedFunctions | Where-Object Schema -notin $ExcludeSchema
+                }
+
+                if ($Name) {
+                    $userDefinedFunctions = $userDefinedFunctions | Where-Object Name -in $Name
+                }
+
+                if ($ExcludeName) {
+                    $userDefinedFunctions = $userDefinedFunctions | Where-Object Name -notin $ExcludeName
+                }
+
+                $userDefinedFunctions | ForEach-Object {
+
+                    Add-Member -Force -InputObject $_ -MemberType NoteProperty -Name ComputerName -Value $server.ComputerName
+                    Add-Member -Force -InputObject $_ -MemberType NoteProperty -Name InstanceName -Value $server.ServiceName
+                    Add-Member -Force -InputObject $_ -MemberType NoteProperty -Name SqlInstance -Value $server.DomainInstanceName
+                    Add-Member -Force -InputObject $_ -MemberType NoteProperty -Name Database -Value $db.Name
 
                     Select-DefaultView -InputObject $_ -Property ComputerName, InstanceName, SqlInstance, Database, Schema, CreateDate, DateLastModified, Name, DataType
                 }

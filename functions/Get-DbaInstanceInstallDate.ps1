@@ -81,20 +81,25 @@ function Get-DbaInstanceInstallDate {
     process {
         foreach ($instance in $SqlInstance) {
             try {
-                $server = Connect-SqlInstance -SqlInstance $instance -SqlCredential $SqlCredential
+                $server = Connect-DbaInstance -SqlInstance $instance -SqlCredential $SqlCredential
             } catch {
-                Stop-Function -Message "Failed to process Instance $Instance" -ErrorRecord $_ -Target $instance -Continue
+                Stop-Function -Message "Failure" -Category ConnectionError -ErrorRecord $_ -Target $instance -Continue
             }
 
             if ($server.VersionMajor -ge 9) {
                 Write-Message -Level Verbose -Message "Getting Install Date for: $instance"
                 $sql = "SELECT create_date FROM sys.server_principals WHERE sid = 0x010100000000000512000000"
                 [DbaDateTime]$sqlInstallDate = $server.Query($sql, 'master', $true).create_date
-
             } else {
                 Write-Message -Level Verbose -Message "Getting Install Date for: $instance"
                 $sql = "SELECT schemadate FROM sysservers"
-                [DbaDateTime]$sqlInstallDate = $server.Query($sql, 'master', $true).create_date
+                [DbaDateTime]$sqlInstallDate = $server.Query($sql, 'master', $true).schemadate
+            }
+
+            if (-not $sqlInstallDate -or $sqlInstallDate -is [System.DBNull]) {
+                Write-Message -Level Verbose -Message "Trying again to get Install Date for: $instance"
+                $sql = "SELECT schemadate FROM sysservers"
+                [DbaDateTime]$sqlInstallDate = $server.Query($sql, 'master', $true).schemadate
             }
 
             $WindowsServerName = $server.ComputerNamePhysicalNetBIOS
